@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import copy
 import random
-import math
 
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Literal
 
 import baseai
 import cards
@@ -36,14 +36,16 @@ class Environment:
             raise ValueError("Parameter envsize value must be an odd number")
         
         self.envsize = envsize
+        self.gridsize = envsize + 1
         self.rng = rng or random.Random()
         self.sm_walls: list[cells.SMWall] = []
         self.space: list[cells.Cell] = []
         self.initiate_space()
-        self.sprinkle_smwalls(sorted(wall_rings))
+        self.create_exit_ring()
+        self.create_smwall_rings(sorted(wall_rings))
         
         for ai in ais:
-            ai.x = ai.y = math.ceil(envsize / 2)
+            ai.x = ai.y = self.gridsize // 2
             
         self.ais = ais
         self.mstate = ModdableEnvAttrs()
@@ -82,47 +84,77 @@ class Environment:
     def initiate_space(self):
         self.space = [cells.Cell() for _ in range(self.envsize ** 2)]
     
-    def sprinkle_smwalls(self, rlayeridxs: list[int]):
-        max_ring = (self.envsize - 1) // 2
+    def create_exit_ring(self):
+        for x, y in self.all_coords():
+            if self.coord_to_rlayeridx(x, y) == 0:
+                self.coord_to_cell(x, y).special_cell = cells.Exit()
+    
+    def create_smwall_rings(self, rlayeridxs: list[int]):
+        if rlayeridxs and rlayeridxs[0] < 1:
+            raise ValueError("Ring 0 is reserved for Exit")
+        if len(set(rlayeridxs)) != len(rlayeridxs):
+            raise ValueError("Duplicate ring detected")
         
         for i, lidx in enumerate(rlayeridxs):
-            inner = rlayeridxs[i + 1] if i + 1 < len(rlayeridxs) else max_ring + 1
-            
-            if inner - lidx < 2:
-                raise ValueError(f"Ring {lidx} has no room for vulnerabilities")
-            
             level = len(rlayeridxs) - i
-            cells = tuple(self.coord_to_cell(x, y) for x, y in self.all_coords() if self.coord_to_rlayeridx(x, y) == lidx)
-            wall = cells.SMWall(level, cells, self.rng)
-            self.sm_walls.append(wall)
-            zone = [(x, y) for x, y in self.coords() if lidx < self.ring_of(x, y) < inner]
-            self.sprinkle_vulns(wall, zone)
+            ring_cells = [
+                self.coord_to_cell(x, y) for x, y in self.all_coords()
+                if self.coord_to_rlayeridx(x, y)
+            ]
             
-    def sprinkle_vulns(self, wall: cells.SMWall, zone: list[tuple[int, int]]) -> None:
-        placed = 0
-        candidates = zone[:]
+            self.sm_walls.append(cells.SMWall(level, ring_cells, self.rng))
         
+        for lidx, wall in zip(rlayeridxs, self.sm_walls):
+            zone = [
+                (x, y) for x, y in self.all_coords()
+                if self.coord_to_rlayeridx(x, y) > lidx
+            ]
+            self.sprinkle_vulns(wall, zone)
+    
+    
+    @staticmethod
+    def _slot_is_free(cell: cells.Cell) -> bool:
+        sc = cell.special_cell
+        if isinstance(sc, cells.SMWallCell):
+            return sc.child is None
+        return sc is None
+    
+    @staticmethod
+    def _put(cell: cells.Cell, special: cells.SpecialCell):
+        if isinstance(cell.special_cell, cells.SMWallCell):
+            cell.special_cell.child = special
+            return
+        cell.special_cell = special
+    
+    def sprinkle_vulns(self, wall: cells.SMWall, zone: list[tuple[int, int]]):
+        zone_set = set(zone)
+        candidates = zone[:]
         self.rng.shuffle(candidates)
+        
+        placed = 0
         for x, y in candidates:
-            if placed >= wall.vuln_count: break
+            if placed >= wall.vuln_count:
+                break
             
             cell = self.coord_to_cell(x, y)
-            if cell.special_cell is not None:
+            if not self._slot_is_free(cell):
                 continue
             
-            cell.special_cell = cells.Vulnerability(wall=wall)
+            self._put(cell, cells.Vulnerability(wall))
             placed += 1
             
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
-                    nx, ny = x + dx, y + dy
-                    cellic = self.coord_to_cell(nx, ny)
+                    n = (x + dx, y + dy)
                     
-                    if self.coord_in_bounds(nx, ny) and cellic.special_cell is None:
-                        cellic.special_cell = cells.VulnerabilitySterileZone()
-        
+                    if n not in zone_set:
+                        continue
+                    
+                    neighbor = self.coord_to_cell(*n)
+                    if self._slot_is_free(neighbor):
+                        self._put(neighbor, cells.VulnerabilitySterileZone())
         if placed < wall.vuln_count:
-            raise ValueError("Zone too small for this wall's vulnerabilities")
+            raise ValueError("Zone too small for this wall's vulnerability")
 
 
     # PLAYER ACTIONS
@@ -192,6 +224,12 @@ class Environment:
     def place(self, x: int, y: int) -> bool:
         shape = self.active_placement.shape
         
+        if (
+            x < 0 or y < 0
+            or x + len(shape[0]) > self.envsize
+            or y + len(shape) > self.envsize
+        ): return False
+        
         affected_cells = [
             self.coord_to_cell(x + ox, y + oy)
             for oy, row in enumerate(shape)
@@ -200,14 +238,19 @@ class Environment:
         ]
         
         for cell in affected_cells:
-            if cell.special_cell in UNPLACEABLE_CELLS:
+            if isinstance(cell.special_cell, UNPLACEABLE_CELLS):
                 return False
             
             if isinstance(cell.special_cell, cells.SMWallCell):
+                if (cell.special_cell.child, UNPLACEABLE_CELLS):
+                    return False
+        
+        for cell in affected_cells:
+            if isinstance(cell.special_cell, cells.SMWallCell):
                 cell.special_cell.child = cells.Obstacle()
                 continue
-            
-            cell.special_cell = cells.Obstacle
+            cell.special_cell = cells.Obstacle()
+        return True
     
        
     # AI THINGIES 
