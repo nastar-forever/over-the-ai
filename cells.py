@@ -28,9 +28,10 @@ class Vulnerability(SpecialCell):
     used: bool = False
 
     def on_corrupted(self) -> None:
-        if not self.used and self.wall is not None:
-            self.used = True
-            self.wall.register_vuln_exploit()
+        if self.used or self.wall is None or not self.wall.active:
+            return
+        self.used = True
+        self.wall.register_vuln_exploit()
 
 
 @dataclass
@@ -72,11 +73,28 @@ class SMWall:
             cell.state = "locked"
         
         self.vuln_count = level * rng.randint(1, 2) + 1
+        self.active = False
+        self.outer: SMWall|None = None
+        self.vuln_cells: list[Cell] = []
+    
+    
+    def activate(self):
+        self.activate = True
+        for cell in self.vuln_cells:
+            if cell.state == "locked" and not isinstance(cell.special_cell, SMWallCell):
+                cell.state = "unexplored"
+    
 
     def register_vuln_exploit(self) -> None:
         self.vuln_count -= 1
         if self.vuln_count > 0: return
         
         for cell in self.cells:
-            cell.state = "unexplored"
-            cell.special_cell = cell.special_cell.child
+            sc = cell.special_cell
+            cell.special_cell = sc.child
+            
+            future = isinstance(sc, Vulnerability) and sc.wall is not None and not sc.wall.active
+            cell.state = "locked" if future else "unexplored"
+            
+        if self.outer is not None:
+            self.outer.activate()

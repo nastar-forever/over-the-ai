@@ -102,14 +102,21 @@ class Environment:
                 if self.coord_to_rlayeridx(x, y)
             ]
             
-            self.sm_walls.append(cells.SMWall(level, ring_cells, self.rng))
+            wall = cells.SMWall(level, ring_cells, self.rng)
+            if self.sm_walls:
+                wall.outer = self.sm_walls[-1]
+            self.sm_walls.append(wall)
         
         for lidx, wall in zip(rlayeridxs, self.sm_walls):
             zone = [
                 (x, y) for x, y in self.all_coords()
                 if self.coord_to_rlayeridx(x, y) > lidx
             ]
+            
             self.sprinkle_vulns(wall, zone)
+            
+        if self.sm_walls:
+            self.sm_walls[-1].activate()
     
     
     @staticmethod
@@ -141,6 +148,8 @@ class Environment:
                 continue
             
             self._put(cell, cells.Vulnerability(wall))
+            cell.state = "locked"
+            wall.vuln_cells.append(cell)
             placed += 1
             
             for dx in (-1, 0, 1):
@@ -153,6 +162,7 @@ class Environment:
                     neighbor = self.coord_to_cell(*n)
                     if self._slot_is_free(neighbor):
                         self._put(neighbor, cells.VulnerabilitySterileZone())
+                        
         if placed < wall.vuln_count:
             raise ValueError("Zone too small for this wall's vulnerability")
 
@@ -273,7 +283,7 @@ class Environment:
                 
                 if isinstance(cell.special_cell, cells.Exit):
                     self.verdict = VERDICT_LOSE
-                    continue
+                    break
                 
-                if isinstance(cell.special_cell, cells.Obstacle):
+                if isinstance(cell.special_cell, cells.Obstacle) or cell.state == "locked":
                     ai.x, ai.y = ai.x - dx, ai.y - dy
