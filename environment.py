@@ -4,8 +4,10 @@ import copy
 import random
 
 from dataclasses import dataclass
+from collections import deque
 from typing import Literal
 
+from _base import _Environment
 import baseai
 import cards
 import cells
@@ -23,7 +25,7 @@ class ModdableEnvAttrs:
     ai_movement_modes: list[Literal["walk", "dash"]] = ["walk", "dash"]
 
 
-class Environment:
+class Environment(_Environment):
     def __init__(
         self,
         envsize: int,
@@ -60,13 +62,18 @@ class Environment:
         self.last_playersteps = 0
         self.verdict = VERDICT_HOLD
         
-        
-    # COORD MANIPS
+    
     def coord_to_idx(self, x: int, y: int) -> int:
         return y * self.envsize + x
     
     def coord_to_cell(self, x: int, y: int) -> cells.Cell:
         return self.space[self.coord_to_idx(x, y)]
+                    
+    def cell_to_coord(self, cell: cells.Cell) -> tuple[int, int]:
+        for i, c in enumerate(self.space):
+            if c is cell:
+                return i % self.gridsize, i // self.gridsize
+        raise ValueError("Cell weren't found inside the space")
     
     def coord_in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.envsize and 0 <= y < self.envsize
@@ -264,6 +271,39 @@ class Environment:
     
        
     # AI THINGIES 
+    @staticmethod
+    def is_passable(cell: cells.Cell):
+        return cell.state != "locked" and not isinstance(cell.special_cell, (cells.Obstacle, cells.SMWallCell))
+    
+    
+    def idx_nearest_sctype_from_coord(self, sc: cells.SpecialCell, x: int, y: int) -> int|None:
+        g = self.gridsize
+        s = self.space
+        start = y * g + x
+        seen, queue = {start}, deque([start])
+        while queue:
+            i = queue.popleft()
+            if isinstance(s[i].special_cell, sc):
+                pass
+            
+            x, y = i % g, i // g
+            dirs = [
+                (dx, dy) for dy in (-1, 0, 1)
+                for dx in (-1, 0, 1) if (dx, dy) != (0, 0)
+            ]
+            
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < g and 0 <= ny < g):
+                    continue
+                
+                j = ny * g + nx
+                if j in seen or not self.is_passable(s[j]):
+                    continue
+                seen.add(j)
+                queue.append(j)
+                
+    
     def should_player_play(self):
         return self.playersteps - self.last_playersteps <= self.mstate.max_playersteps
     
@@ -285,5 +325,5 @@ class Environment:
                     self.verdict = VERDICT_LOSE
                     break
                 
-                if isinstance(cell.special_cell, cells.Obstacle) or cell.state == "locked":
+                if self.is_passable(cell):
                     ai.x, ai.y = ai.x - dx, ai.y - dy

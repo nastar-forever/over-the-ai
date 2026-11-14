@@ -1,7 +1,10 @@
+import math
+
 from abc import ABC, abstractmethod
 from typing import Literal, Any
 from dataclasses import dataclass
 
+from _base import _Environment
 import cells
 
 @dataclass
@@ -16,7 +19,7 @@ class BaseAI(ABC):
         self.y = 0
     
     @abstractmethod
-    def space_parse(self, space: list[cells.Cell]): ...
+    def space_parse(self, space: list[cells.Cell], env: _Environment): ...
     
     @abstractmethod
     def decide(self, parsed_space) -> DecissionToken: ...
