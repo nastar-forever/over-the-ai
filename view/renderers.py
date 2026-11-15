@@ -116,9 +116,10 @@ class WallLabelRenderer(Renderer):
         for wall in env.sm_walls:
             if wall.collapsed:
                 continue
+            
             ring = env.coord_to_rlayeridx(*env.cell_to_coord(wall.cells[0]))
             left = sum(1 for c in wall.vuln_cells if (v := self._vuln(c)) and not v.used)
-            text = f"L{wall.level} | left {left} | min {wall.min_exploits}"
+            text = f"L{wall.level} | {wall.exploited}/{wall.min_exploits} | left {left}"
             label = ctx.assets.text(text, font, (255, 255, 255) if wall.active else (150, 150, 160))
 
             center = ctx.viewport.cell_to_rect((env.envsize // 2, ring)).center
