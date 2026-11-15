@@ -6,11 +6,11 @@ from dataclasses import dataclass, field, replace
 from collections import deque
 from typing import Literal
 
-from game._base import _Environment
-import game.baseai as baseai
-import game.cards as cards
-import game.cells as cells
-import game.events as events
+from _base import _Environment
+import baseai
+import cards
+import cells
+import events
 
 VERDICT_HOLD = 0
 VERDICT_WIN = 1

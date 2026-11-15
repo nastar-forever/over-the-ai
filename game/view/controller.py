@@ -1,5 +1,5 @@
-import game.environment as environment
-from game.environment import VERDICT_HOLD
+import environment as environment
+from environment import VERDICT_HOLD
 from . import anim
 from . import widgets
 

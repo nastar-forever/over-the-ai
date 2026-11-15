@@ -4,7 +4,7 @@ import pygame
 from typing import Callable, ClassVar, Any
 from dataclasses import dataclass
 
-import game.cells as cells
+import cells as cells
 
 @dataclass
 class SurfaceContainer:

@@ -1,15 +1,15 @@
 import asyncio
 import pygame
 
-import game.cells as cells, game.cards as cards
-from game.view.theme import Theme
-from game.environment import Environment
-from game.default_ais import BFSAI
-from game.view import assets
-from game.view.controller import GameController
-from game.view.viewport import Viewport
-from game.view.renderers import RenderContext, GridRenderer, AIRenderer, GhostRenderer, WallLabelRenderer, VerdictRenderer
-from game.view.widgets import (
+import cells, cards
+from view.theme import Theme
+from environment import Environment
+from default_ais import BFSAI
+from view import assets
+from view.controller import GameController
+from view.viewport import Viewport
+from view.renderers import RenderContext, GridRenderer, AIRenderer, GhostRenderer, WallLabelRenderer, VerdictRenderer
+from view.widgets import (
     HandView, Button, PlacementInput, TextPanel, RerollRequest, EndTurnRequest, ReplayRequest
 )
 
@@ -138,4 +138,6 @@ async def main():
         vp.present(logical, window)
         pygame.display.flip()
         await asyncio.sleep(0)
-asyncio.run(main())
+        
+if __name__ == "__main__":
+    asyncio.run(main())

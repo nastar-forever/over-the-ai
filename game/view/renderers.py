@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pygame
 
-import game.environment as environment, game.cells as cells
+import environment, cells
 from . import anim
 from . import viewport
 from . import assets

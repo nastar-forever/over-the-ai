@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Literal, Any
 from dataclasses import dataclass
 
-from game._base import _Environment
-import game.cells as cells
+from _base import _Environment
+import cells as cells
 
 @dataclass
 class DecisionToken:

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import pygame
 
-import game.events as events
+import events as events
 
 @dataclass
 class CrossFrameData:

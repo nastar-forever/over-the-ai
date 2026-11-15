@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, Callable, ClassVar
 from dataclasses import dataclass, field, replace
 
-import game.cells as cells
+import cells
 
 @dataclass
 class PlacementToken:

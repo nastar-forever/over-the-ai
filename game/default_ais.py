@@ -3,9 +3,9 @@ from collections import deque
 from typing import Literal
 from enum import IntEnum
 
-import game.cells as cells
-from game.baseai import BaseAI, DecisionToken, Inable
-from game.environment import Environment
+import cells as cells
+from baseai import BaseAI, DecisionToken, Inable
+from environment import Environment
 
 class CellState(IntEnum):
     FREE = 0

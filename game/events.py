@@ -1,7 +1,7 @@
 from typing import Literal
 from dataclasses import dataclass
 
-import game.cards as cards
+import cards
 
 @dataclass
 class GameEvent:
