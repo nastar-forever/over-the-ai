@@ -3,10 +3,13 @@ from __future__ import annotations
 from typing import Any, Literal, Callable, ClassVar
 from dataclasses import dataclass
 
+import cells
+
 @dataclass
 class PlacementToken:
     shape: list[list[bool]]
     type: Literal["obstacle", "flush"] = "obstacle"
+    special_cell: cells.SpecialCell = cells.Obstacle
     
     def rot_cw(self):
         pass
@@ -26,7 +29,7 @@ class TempModificationToken:
     duration: int
     op_only_once: bool = True
     update_dur_on_recast: bool = True
-    effective_since: int|None = None
+    effective_since: int = 0
     original_value: Any|None = None
     
     def __post_init__(self, original_value: Any):

@@ -3,13 +3,17 @@ from __future__ import annotations
 import random
 
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, Callable
+
+@dataclass
+class SCDestruct:
+    pass
 
 @dataclass
 class SpecialCell:
     priority: ClassVar[int] = 0
 
-    def on_corrupted(self) -> None:
+    def on_corrupted(self) -> None|SCDestruct:
         pass
 
 
@@ -24,6 +28,7 @@ class Obstacle(SpecialCell):
 
 @dataclass
 class Vulnerability(SpecialCell):
+    priority: ClassVar[int] = 1
     wall: SMWall | None = None
     used: bool = False
 
@@ -42,6 +47,11 @@ class VulnerabilitySterileZone(SpecialCell):
 @dataclass
 class FakeRewards(SpecialCell):
     priority: ClassVar[int] = 3
+    used: bool = False
+    
+    def on_corrupted(self):
+        self.priority = 0
+        used = True
 
 @dataclass
 class Exit(SpecialCell):
@@ -55,10 +65,13 @@ class Cell:
 
     def step_on(self) -> None:
         if self.special_cell is not None:
-            self.special_cell.on_corrupted()
+            res = self.special_cell.on_corrupted()
+            
+            if isinstance(res, SCDestruct):
+                self.special_cell = None
 
     def get_priority(self) -> int:
-        visible = self.state in ("locked", "explored")
+        visible = self.state not in ("locked", "explored")
         return self.special_cell.priority if self.special_cell and visible else 0
     
 
@@ -76,14 +89,15 @@ class SMWall:
         self.active = False
         self.outer: SMWall|None = None
         self.vuln_cells: list[Cell] = []
+        self.on_collapse: Callable = lambda: None
     
     
     def activate(self):
-        self.activate = True
+        self.active = True
         for cell in self.vuln_cells:
             if cell.state == "locked" and not isinstance(cell.special_cell, SMWallCell):
                 cell.state = "unexplored"
-    
+
 
     def register_vuln_exploit(self) -> None:
         self.vuln_count -= 1
@@ -98,3 +112,5 @@ class SMWall:
             
         if self.outer is not None:
             self.outer.activate()
+            
+        self.on_collapse()

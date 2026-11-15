@@ -23,6 +23,7 @@ class ModdableEnvAttrs:
     show_ai_minds: bool = False
     max_playersteps: int = 3
     ai_movement_modes: list[Literal["walk", "dash"]] = ["walk", "dash"]
+    banned_cards: list[cards.Card] = []
 
 
 class Environment(_Environment):
@@ -72,7 +73,7 @@ class Environment(_Environment):
     def cell_to_coord(self, cell: cells.Cell) -> tuple[int, int]:
         for i, c in enumerate(self.space):
             if c is cell:
-                return i % self.gridsize, i // self.gridsize
+                return i % self.envsize, i // self.envsize
         raise ValueError("Cell weren't found inside the space")
     
     def coord_in_bounds(self, x: int, y: int) -> bool:
@@ -88,6 +89,10 @@ class Environment(_Environment):
     
     
     # INITIALIZATOR
+    def _on_smwall_collapse(self):
+        for ai in self.ais:
+            ai.max_walk_steps += 1
+    
     def initiate_space(self):
         self.space = [cells.Cell() for _ in range(self.envsize ** 2)]
     
@@ -110,6 +115,7 @@ class Environment(_Environment):
             ]
             
             wall = cells.SMWall(level, ring_cells, self.rng)
+            wall.on_collapse = self._on_smwall_collapse
             if self.sm_walls:
                 wall.outer = self.sm_walls[-1]
             self.sm_walls.append(wall)
@@ -192,7 +198,7 @@ class Environment(_Environment):
             if mod.target_op is not None:
                 setattr(self, attr, mod.target_op(getattr(self.mstate, attr)))
                 
-            mod.effective_since = self.playersteps
+            mod.effective_since += self.playersteps
             self.active_temp_mods[attr] = mod
 
 
@@ -211,10 +217,13 @@ class Environment(_Environment):
                 setattr(self.mstate, attr, mod.target_op(getattr(self.mstate, attr)))
         
     
-    def play_card(self, card: cards.Card):
+    def play_card(self, card: cards.Card) -> bool:
+        if self.active_placement is not None or isinstance(card, self.mstate.banned_cards):
+            return False
         self.apply_action(card.on_activation(self.bank, self.fetched))
         self.fetched.remove(card)
         self._playerstep()
+        return True
         
     def merge(self, idledidx: int, ovidx: int):
         card1, card2 = self.fetched[idledidx], self.fetched[ovidx]
@@ -239,6 +248,8 @@ class Environment(_Environment):
         
         
     def place(self, x: int, y: int) -> bool:
+        if self.active_placement is None:
+            return
         shape = self.active_placement.shape
         
         if (
@@ -263,10 +274,13 @@ class Environment(_Environment):
                     return False
         
         for cell in affected_cells:
+            sp = self.active_placement.special_cell
+            
             if isinstance(cell.special_cell, cells.SMWallCell):
-                cell.special_cell.child = cells.Obstacle()
+                cell.special_cell.child = sp()
                 continue
-            cell.special_cell = cells.Obstacle()
+            cell.special_cell = sp()
+        self.active_placement = None
         return True
     
        
@@ -308,22 +322,48 @@ class Environment(_Environment):
         return self.playersteps - self.last_playersteps <= self.mstate.max_playersteps
     
     def aistep(self):
+        inable_counts = 0
+        
         for ai in self.ais:
-            decision = ai.decide(ai.space_parse(self.space))
-            distance = decision.distance if decision.mode == "walk" else 9999
+            # CHECK WHETHER THE AI ENCAPSULATED YET
+            td1 = ai.decide(ai.space_parse(
+                [cells.Cell(cell.state) for cell in self.space if isinstance(cell.special_cell, cells.SMWallCell)],
+                self
+            ))
+            
+            decision = ai.decide(ai.space_parse(self.space, self))
+            
+            if any(isinstance(cond, baseai.Inable) for cond in [td1, decision]):
+                inable_counts += 1
+                continue
+            
+            fromconvert = {
+                "dash": (ai.max_walk_steps, "walk"),
+                "walk": (9999, "dash")
+            }
+            
+            if decision.mode not in self.mstate.ai_movement_modes:
+                decision.distance, decision.mode = fromconvert(decision.mode)
+            
+            distance = decision.distance if decision.mode == "walk" else fromconvert["dash"][0]
             dx, dy = decision.direction
             
             for _ in range(distance):
                 ai.x, ai.y = ai.x + dx, ai.y + dy
                 cell = self.coord_to_cell(ai.x, ai.y)
                 cell.state = "explored"
+                cell.step_on()
                 
                 if cell.special_cell is not None:
                     cell.special_cell.on_corrupted()
                 
                 if isinstance(cell.special_cell, cells.Exit):
                     self.verdict = VERDICT_LOSE
-                    break
+                    return
                 
                 if self.is_passable(cell):
                     ai.x, ai.y = ai.x - dx, ai.y - dy
+                    
+        if inable_counts >= len(self.ais) - 1:
+            self.verdict = VERDICT_WIN
+            return
