@@ -77,6 +77,7 @@ class Environment(_Environment):
                 return i % self.envsize, i // self.envsize
         raise ValueError("Cell weren't found inside the space")
     
+    
     def coord_in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.envsize and 0 <= y < self.envsize
     
@@ -115,7 +116,7 @@ class Environment(_Environment):
                 if self.coord_to_rlayeridx(x, y)
             ]
             
-            wall = cells.SMWall(level, ring_cells, self.rng)
+            wall = cells.SMWall(level, ring_cells, rng=self.rng)
             wall.on_collapse = self._on_smwall_collapse
             if self.sm_walls:
                 wall.outer = self.sm_walls[-1]
@@ -273,6 +274,9 @@ class Environment(_Environment):
         ]
         
         for cell in affected_cells:
+            if self.active_placement.type != "flush" and cell.state == "explored":
+                return False
+            
             if isinstance(cell.special_cell, UNPLACEABLE_CELLS):
                 return False
             
@@ -281,6 +285,10 @@ class Environment(_Environment):
                     return False
         
         for cell in affected_cells:
+            if self.active_placement.type == "flush":
+                cell.state = "unexplored"
+                continue
+            
             sp = self.active_placement.special_cell
             
             if isinstance(cell.special_cell, cells.SMWallCell):
@@ -328,20 +336,73 @@ class Environment(_Environment):
     def should_player_play(self):
         return self.playersteps - self.last_playersteps <= self.mstate.max_player_stepcount
     
+    @staticmethod
+    def _is_player_block(cell: cells.Cell) -> bool:
+        sc = cell.special_cell
+        if isinstance(sc, cells.SMWallCell):
+            sc = sc.child
+        return isinstance(sc, cells.Obstacle)
+    
+    def _flood(self, start: tuple[int, int]) -> tuple[set[tuple[int, int]], bool]: # (reachable coords, sealed)
+        seen, queue, sealed = {start}, deque([start]), True
+        while queue:
+            x, y = queue.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                
+                if (nx, ny) in seen:
+                    continue
+                if not self.coord_in_bounds(nx, ny):
+                    sealed = False
+                    continue
+                
+                cell = self.coord_to_cell(nx, ny)
+                if self.is_passable(cell):
+                    seen.add((nx, ny))
+                    queue.append((nx, ny))
+                    
+                elif not self._is_player_block(cell):
+                    sealed = False
+        return seen, sealed
+    
+    def are_ais_isolated(self) -> bool:
+        return all(self._flood((ai.x, ai.y))[1] for ai in self.ais)
+    
+    def are_ais_starved(self) -> bool:
+        reachable = set()
+        
+        for ai in self.ais:
+            reachable |= self._flood((ai.x, ai.y))[0]
+        reachable_ids = {id(self.coord_to_cell(*p)) for p in reachable}
+        
+        for wall in self.sm_walls:
+            if not wall.active or wall.collapsed:
+                continue
+            
+            available = sum(
+                1 for cell in wall.vuln_cells
+                if isinstance(cell.special_cell, cells.Vulnerability)
+                and not cell.special_cell.used and id(cell) in reachable_ids
+            )
+            
+            if available < wall.required - wall.exploited:
+                return True
+        return False
+    
+    def _check_win(self) -> bool:
+        if self.are_ais_isolated() or self.are_ais_starved():
+            self.verdict = VERDICT_WIN
+            return True
+        return False
+        
+    
     def aistep(self):
         inable_counts = 0
         self.last_playersteps = self.playersteps
         
         for ai in self.ais:
-            # CHECK WHETHER THE AI ENCAPSULATED YET
-            td1 = ai.decide(ai.space_parse(
-                [cells.Cell(cell.state) for cell in self.space if isinstance(cell.special_cell, cells.SMWallCell)],
-                self
-            ))
-            
             decision = ai.decide(ai.space_parse(self.space, self))
-            
-            if any(isinstance(cond, baseai.Inable) for cond in [td1, decision]):
+            if isinstance(decision, baseai.Inable):
                 inable_counts += 1
                 continue
             
@@ -371,8 +432,12 @@ class Environment(_Environment):
                 
                 if self.is_passable(cell):
                     ai.x, ai.y = ai.x - dx, ai.y - dy
-                    
-        if inable_counts >= len(self.ais) - 1:
+                  
+        if self.is_ai_starved():
+            self.verdict = VERDICT_WIN
+            return
+          
+        if inable_counts >= len(self.ais) or self._check_win():
             self.verdict = VERDICT_WIN
             return
         

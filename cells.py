@@ -85,13 +85,22 @@ class SMWall:
             cell.special_cell = SMWallCell(level=level, child=cell.special_cell)
             cell.state = "locked"
         
-        self.min_exploits = 3 if min_exploits is None else min_exploits
-        self.vuln_count = self.min_exploits + random.randint(0, 2)
+        self.rng = rng
+        self._min_exploits = 3 if min_exploits is None else min_exploits
+        self.vuln_count = self._min_exploits + rng.randint(0, 2)
         self.exploited = 0
         self.active = False
         self.outer: SMWall|None = None
         self.vuln_cells: list[Cell] = []
         self.on_collapse: Callable = lambda: None
+    
+    @property
+    def min_exploits(self) -> int:
+        return min(self._min_exploits, len(self.vuln_cells))
+    
+    @property
+    def collapsed(self) -> bool:
+        return self.exploited >= self.min_exploits
     
     
     def activate(self):
@@ -103,7 +112,7 @@ class SMWall:
 
     def register_vuln_exploit(self) -> None:
         self.exploited += 1
-        if self.exploited < min(self.min_exploits, len(self.vuln_cells)): return
+        if self.exploited < min(self._min_exploits, len(self.vuln_cells)): return
         
         for cell in self.vuln_cells:
             sc = cell.special_cell
