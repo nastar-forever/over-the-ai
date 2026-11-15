@@ -76,7 +76,7 @@ class Cell:
     
 
 class SMWall:
-    def __init__(self, level: int, cells: tuple[Cell, ...], rng: random.Random | None = None):
+    def __init__(self, level: int, cells: tuple[Cell, ...], min_exploits: int|None = None, rng: random.Random | None = None):
         rng = rng or random.Random()
         self.level = level
         self.cells = cells
@@ -85,7 +85,9 @@ class SMWall:
             cell.special_cell = SMWallCell(level=level, child=cell.special_cell)
             cell.state = "locked"
         
-        self.vuln_count = level * rng.randint(1, 2) + 1
+        self.min_exploits = 3 if min_exploits is None else min_exploits
+        self.vuln_count = self.min_exploits + random.randint(0, 2)
+        self.exploited = 0
         self.active = False
         self.outer: SMWall|None = None
         self.vuln_cells: list[Cell] = []
@@ -100,17 +102,22 @@ class SMWall:
 
 
     def register_vuln_exploit(self) -> None:
-        self.vuln_count -= 1
-        if self.vuln_count > 0: return
+        self.exploited += 1
+        if self.exploited < min(self.min_exploits, len(self.vuln_cells)): return
         
+        for cell in self.vuln_cells:
+            sc = cell.special_cell
+            vuln = sc.child if isinstance(sc, SMWallCell) else sc
+            if isinstance(vuln, Vulnerability) and not vuln.used:
+                vuln.used = True
+                vuln.state = "explored"
+            
         for cell in self.cells:
             sc = cell.special_cell
             cell.special_cell = sc.child
-            
             future = isinstance(sc, Vulnerability) and sc.wall is not None and not sc.wall.active
             cell.state = "locked" if future else "unexplored"
-            
+        
         if self.outer is not None:
             self.outer.activate()
-            
         self.on_collapse()
