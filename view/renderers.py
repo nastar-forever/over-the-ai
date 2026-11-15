@@ -4,11 +4,8 @@ from dataclasses import dataclass
 
 import pygame
 
-import environment
-import cells
-import viewport
-import assets
-import anim
+import environment, cells
+from . import viewport, assets, anim
 
 @dataclass
 class RenderContext:

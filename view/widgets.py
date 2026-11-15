@@ -4,7 +4,7 @@ from typing import Literal
 
 import pygame
 
-import assets
+from . import assets
 
 @dataclass
 class UIToken: pass

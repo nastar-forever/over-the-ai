@@ -40,6 +40,7 @@ class Environment(_Environment):
         if not envsize % 2:
             raise ValueError("Parameter envsize value must be an odd number")
         
+        self.events: list[events.GameEvent] = []
         self.fetch_size = fetch_size
         self.pool = pool
         self.envsize = envsize
@@ -61,7 +62,6 @@ class Environment(_Environment):
         self.fetched: list[cards.Card] = []
         self.active_temp_mods: dict[str, cards.TempModificationToken] = {}
         self.active_placement: cards.PlacementToken = None
-        self.events: list[events.GameEvent] = []
         
         self.playersteps = 0
         self.aisteps = 0
@@ -177,38 +177,48 @@ class Environment(_Environment):
             return
         cell.special_cell = special
     
-    def sprinkle_vulns(self, wall: cells.SMWall, zone: list[tuple[int, int]]):
+    def _pick_vuln_coords(self, zone, count, avoid, attempts=50):
+        cands = [p for p in zone if p not in avoid]
+        for _ in range(attempts):
+            self.rng.shuffle(cands)
+            blocked, picked = set(), []
+            
+            for x, y in cands:
+                if (x, y) in blocked or not self._slot_is_free(self.coord_to_cell(x, y)):
+                    continue
+            
+                picked.append((x, y))
+                blocked.update((x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+            
+                if len(picked) == count:
+                    return picked
+        return None
+
+    def sprinkle_vulns(self, wall, zone):
         zone_set = set(zone)
-        candidates = zone[:]
-        self.rng.shuffle(candidates)
+        spawn = (self.envsize // 2, self.envsize // 2)
+        picked = self._pick_vuln_coords(zone, wall.vuln_count, avoid={spawn})
         
-        placed = 0
-        for x, y in candidates:
-            if placed >= wall.vuln_count:
-                break
-            
+        if picked is None:
+            raise ValueError(
+                f"Wall level {wall.level}: zone of {len(zone)} cells can't fit {wall.vuln_count} "
+                f"flaws with sterile zones. Move the ring outward or enlarge envsize."
+            )
+
+        for x, y in picked:
             cell = self.coord_to_cell(x, y)
-            if not self._slot_is_free(cell):
-                continue
-            
             self._put(cell, cells.Vulnerability(wall))
             cell.state = "locked"
             wall.vuln_cells.append(cell)
-            placed += 1
-            
+
+        for x, y in picked:
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
                     n = (x + dx, y + dy)
-                    
-                    if n not in zone_set:
-                        continue
-                    
-                    neighbor = self.coord_to_cell(*n)
-                    if self._slot_is_free(neighbor):
-                        self._put(neighbor, cells.VulnerabilitySterileZone())
-                        
-        if placed < wall.vuln_count:
-            raise ValueError("Zone too small for this wall's vulnerability")
+                    if n in zone_set:
+                        neighbor = self.coord_to_cell(*n)
+                        if self._slot_is_free(neighbor):
+                            self._put(neighbor, cells.VulnerabilitySterileZone())
 
 
     # PLAYER ACTIONS
@@ -480,7 +490,7 @@ class Environment(_Environment):
                 and not cell.special_cell.used and id(cell) in reachable_ids
             )
             
-            if available < wall.required - wall.exploited:
+            if available < wall.min_exploits - wall.exploited:
                 return True
         return False
     
