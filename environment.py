@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import random
 
 from dataclasses import dataclass, field
@@ -11,7 +10,7 @@ from _base import _Environment
 import baseai
 import cards
 import cells
-from render import events
+import events
 
 VERDICT_HOLD = 0
 VERDICT_WIN = 1
@@ -23,7 +22,7 @@ UNPLACEABLE_CELLS = (cells.Obstacle, cells.Vulnerability, cells.VulnerabilitySte
 class ModdableEnvAttrs:
     show_ai_minds: bool = False
     max_player_stepcount: int = 3
-    ai_movement_modes: list[Literal["walk", "dash"]] = field(default=lambda: ["walk", "dash"])
+    ai_movement_modes: list[Literal["walk", "dash"]] = field(default_factory=lambda: ["walk", "dash"])
     banned_cards: list[cards.Card] = field(default_factory=list)
 
 
@@ -33,14 +32,17 @@ class Environment(_Environment):
         envsize: int,
         wall_rings: tuple[int],
         ais: list[baseai.BaseAI],
+        pool: list[type[cards.Card]],
+        fetch_size: int = 4,
         rng: random.Random|None = None,
         bank_limit: int = 4
     ):
         if not envsize % 2:
             raise ValueError("Parameter envsize value must be an odd number")
         
+        self.fetch_size = fetch_size
+        self.pool = pool
         self.envsize = envsize
-        self.gridsize = envsize + 1
         self.rng = rng or random.Random()
         self.sm_walls: list[cells.SMWall] = []
         self.space: list[cells.Cell] = []
@@ -49,7 +51,7 @@ class Environment(_Environment):
         self.create_smwall_rings(sorted(wall_rings))
         
         for ai in ais:
-            ai.x = ai.y = self.gridsize // 2
+            ai.x = ai.y = self.envsize // 2
             
         self.ais = ais
         self.mstate = ModdableEnvAttrs()
@@ -79,12 +81,15 @@ class Environment(_Environment):
     
     def coord_to_cell(self, x: int, y: int) -> cells.Cell:
         return self.space[self.coord_to_idx(x, y)]
-                    
-    def cell_to_coord(self, cell: cells.Cell) -> tuple[int, int]:
-        for i, c in enumerate(self.space):
-            if c is cell:
-                return i % self.envsize, i // self.envsize
-        raise ValueError("Cell weren't found inside the space")
+
+    def cell_to_coord(self, cell):
+        return self._coord_of[id(cell)]
+
+    def _emit_cell(self, cell: cells.Cell):
+        self.emit(events.CellChanged(*self._coord_of[id(cell)]))
+
+    def _emit_fetched(self, occasion):
+        self.emit(events.FetchedChanged(list(self.fetched), list(self.bank), occasion))
     
     
     def coord_in_bounds(self, x: int, y: int) -> bool:
@@ -100,21 +105,34 @@ class Environment(_Environment):
     
     
     # INITIALIZATOR
-    def _on_smwall_collapse(self):
+    def _on_smwall_collapse(self, wall: cells.SMWall):
         for ai in self.ais:
             ai.max_walk_steps += 1
+        self.emit(events.SMWallCollapsed(wall.level))
+        
+        revealed = [*wall.cells, *wall.vuln_cells]
+        if wall.outer is not None:
+            revealed +- wall.outer.vuln_cells
+            
+        for cell in revealed:
+            self._emit_cell(cell)
+    
     
     def initiate_space(self):
         self.space = [cells.Cell() for _ in range(self.envsize ** 2)]
+        self._coord_of = {id(c): (i % self.envsize, i // self.envsize) for i, c in enumerate(self.space)}
+    
     
     def create_exit_ring(self):
         for x, y in self.all_coords():
             if self.coord_to_rlayeridx(x, y) == 0:
                 self.coord_to_cell(x, y).special_cell = cells.Exit()
     
+    
     def create_smwall_rings(self, rlayeridxs: list[int]):
         if rlayeridxs and rlayeridxs[0] < 1:
             raise ValueError("Ring 0 is reserved for Exit")
+        
         if len(set(rlayeridxs)) != len(rlayeridxs):
             raise ValueError("Duplicate ring detected")
         
@@ -122,11 +140,11 @@ class Environment(_Environment):
             level = len(rlayeridxs) - i
             ring_cells = [
                 self.coord_to_cell(x, y) for x, y in self.all_coords()
-                if self.coord_to_rlayeridx(x, y)
+                if self.coord_to_rlayeridx(x, y) == lidx
             ]
             
             wall = cells.SMWall(level, ring_cells, rng=self.rng)
-            wall.on_collapse = self._on_smwall_collapse
+            wall.on_collapse = lambda w=wall: self._on_smwall_collapse(w)
             self.emit(events.SMWallCollapsed(level))
             
             if self.sm_walls:
@@ -199,6 +217,9 @@ class Environment(_Environment):
         self.fetched = [c for c in self.fetched if c not in token.remove_cards]
         self.fetched.extend(c() for c in token.add_cards)
         
+        if token.remove_cards or token.add_cards:
+            self._emit_fetched("manip")
+        
         if token.do_placement is not None:
             self.active_placement = token.do_placement
 
@@ -221,6 +242,7 @@ class Environment(_Environment):
             setattr(self.mstate, attr, val)
             mod.effective_since = self.playersteps + mod.effective_offset
             self.active_temp_mods[attr] = mod
+            self.emit(events.ModfierActivated(mod))
 
 
     def _playerstep(self):
@@ -247,11 +269,49 @@ class Environment(_Environment):
             return False
         self._apply_action(card.on_activation(self.bank, self.fetched))
         self.fetched.remove(card)
+        self._emit_fetched("user")
         self._playerstep()
         return True
     
-    def meregable_partners_card(self, card_idx: cards.Card|int) -> list[cards.Card]:
-        card = card_idx if isinstance(card_idx, cards.Card) else self.fetched[self.fetched]
+    def reroll(self) -> bool:
+        if self.active_placement is not None:
+            return False
+        
+        self.fetched = [self.rng.choice(self.pool)() for _ in range(self.fetch_size)]
+        self._emit_fetched("shuffled")
+        self._playerstep()
+        return True
+    
+    def transfer(self, card: cards.Card) -> bool:
+        if self.active_placement is not None:
+            return False
+        
+        if card in self.fetched:
+            if len(self.bank) >= self.bank_limit:
+                return False
+            
+            self.fetched.remove(card)
+            self.bank.append(card)
+            
+        elif card in self.bank:
+            self.bank.remove(card)
+            self.fetched.append(card)
+            
+        else:
+            return False
+        self._emit_fetched("transferred")
+        self._playerstep()
+        return True
+    
+    def withdraw_idx(self, idx: int) -> bool:
+        return self.transfer(self.bank[idx])
+    
+    def deposit_idx(self, idx) -> bool:
+        return self.transfer(self.fetched[idx])
+    
+    
+    def mergeable_partners_card(self, card_idx: cards.Card|int) -> list[cards.Card]:
+        card = card_idx if isinstance(card_idx, cards.Card) else self.fetched[card_idx]
         if card not in self.fetched:
             raise ValueError(f"{card} is not fetched")
         
@@ -262,7 +322,7 @@ class Environment(_Environment):
         return mergeable
     
     def mergeable_partners_idx(self, card_idx: cards.Card|int) -> list[int]:
-        mergeable = self.meregable_partners_card(card_idx)
+        mergeable = self.mergeable_partners_card(card_idx)
         midx = [self.fetched.index(card) for card in mergeable]
         return midx
         
@@ -280,9 +340,11 @@ class Environment(_Environment):
         
         self._apply_action(c1.on_merging(c2))
         self._apply_action(c2.on_merging(c1))
-        self.fetched[ovidx] = result()
+        merged = result()
+        self.fetched[ovidx] = merged
         
         del self.fetched[idledidx]
+        self._emit(events.MergingHappened(list(self.fetched), c1, c2, merged))
         self._playerstep()
         
         return True
@@ -317,18 +379,18 @@ class Environment(_Environment):
                 if isinstance(cell.special_cell.child, UNPLACEABLE_CELLS):
                     return False
         
+        token = self.active_placement
         for cell in affected_cells:
-            if self.active_placement.type == "flush":
+            if token.type == "flush":
                 cell.state = "unexplored"
-                continue
-            
-            sp = self.active_placement.special_cell
-            
-            if isinstance(cell.special_cell, cells.SMWallCell):
-                cell.special_cell.child = sp()
-                continue
-            cell.special_cell = sp()
+            elif isinstance(cell.special_cell, cells.SMWallCell):
+                cell.special_cell.child = token.special_cell()
+            else:
+                cell.special_cell = token.special_cell()
+            self._emit_cell(cell)
+
         self.active_placement = None
+        self.emit(events.Placement(token))
         return True
     
        
@@ -338,32 +400,32 @@ class Environment(_Environment):
         return cell.state != "locked" and not isinstance(cell.special_cell, (cells.Obstacle, cells.SMWallCell))
     
     
-    def idx_nearest_sctype_from_coord(self, sc: cells.SpecialCell, x: int, y: int) -> int|None:
-        g = self.gridsize
-        s = self.space
-        start = y * g + x
-        seen, queue = {start}, deque([start])
-        while queue:
-            i = queue.popleft()
-            if isinstance(s[i].special_cell, sc):
-                pass
+    # def idx_nearest_sctype_from_coord(self, sc: cells.SpecialCell, x: int, y: int) -> int|None:
+    #     g = self.gridsize
+    #     s = self.space
+    #     start = y * g + x
+    #     seen, queue = {start}, deque([start])
+    #     while queue:
+    #         i = queue.popleft()
+    #         if isinstance(s[i].special_cell, sc):
+    #             pass
             
-            x, y = i % g, i // g
-            dirs = [
-                (dx, dy) for dy in (-1, 0, 1)
-                for dx in (-1, 0, 1) if (dx, dy) != (0, 0)
-            ]
+    #         x, y = i % g, i // g
+    #         dirs = [
+    #             (dx, dy) for dy in (-1, 0, 1)
+    #             for dx in (-1, 0, 1) if (dx, dy) != (0, 0)
+    #         ]
             
-            for dx, dy in dirs:
-                nx, ny = x + dx, y + dy
-                if not (0 <= nx < g and 0 <= ny < g):
-                    continue
+    #         for dx, dy in dirs:
+    #             nx, ny = x + dx, y + dy
+    #             if not (0 <= nx < g and 0 <= ny < g):
+    #                 continue
                 
-                j = ny * g + nx
-                if j in seen or not self.is_passable(s[j]):
-                    continue
-                seen.add(j)
-                queue.append(j)
+    #             j = ny * g + nx
+    #             if j in seen or not self.is_passable(s[j]):
+    #                 continue
+    #             seen.add(j)
+    #             queue.append(j)
                 
     
     def should_player_play(self):
@@ -424,50 +486,67 @@ class Environment(_Environment):
     
     def _check_win(self) -> bool:
         if self.are_ais_isolated() or self.are_ais_starved():
-            self.verdict = VERDICT_WIN
-            self.emit(events.VerdictReached(self.verdict))
+            self._set_verdict(VERDICT_WIN)
             return True
         return False
-        
     
+    def _set_verdict(self, verdict: int):
+        if self.verdict != VERDICT_HOLD: # idempotent
+            return
+        self.verdict = verdict
+        self.emit(events.VerdictReached(verdict))    
+    
+    def _move_ai(self, idx: int, ai, decision) -> bool:
+        mode, distance = decision.mode, decision.distance
+        if mode not in self.mstate.ai_movement_modes:
+            mode, distance = ("walk", ai.max_walk_steps) if mode == "dash" else ("dash", self.envsize)
+        elif mode == "dash":
+            distance = self.envsize
+
+        dx, dy = decision.direction
+        path = [(ai.x, ai.y)]
+        slot = len(self.events)
+        reached_exit = False
+
+        for _ in range(distance):
+            nx, ny = ai.x + dx, ai.y + dy
+            if not self.coord_in_bounds(nx, ny):
+                break
+            cell = self.coord_to_cell(nx, ny)
+            if not self.is_passable(cell):
+                break
+
+            ai.x, ai.y = nx, ny
+            path.append((nx, ny))
+            cell.state = "explored"
+            cell.step_on()                    # may collapse a wall -> emits its own events
+            self.emit(events.CellChanged(nx, ny))
+        
+            if isinstance(cell.special_cell, cells.Exit):
+                reached_exit = True
+                break
+
+        if len(path) > 1:
+            self.events.insert(slot, events.AIMoved(idx, path, mode))
+        return reached_exit
+
+
     def aistep(self):
-        for ai in self.ais:
+        stuck = 0
+        
+        for idx, ai in enumerate(self.ais):
             decision = ai.decide(ai.space_parse(self.space, self))
             if isinstance(decision, baseai.Inable):
-                inable_counts += 1
+                stuck += 1
                 continue
-
-            mode, distance = decision.mode, decision.distance
-            
-            if mode not in self.mstate.ai_movement_modes:
-                mode, distance = ("walk", ai.max_walk_steps) if mode == "dash" else ("dash", self.envsize)
-            
-            elif mode == "dash":
-                distance = self.envsize
-
-            dx, dy = decision.direction
-            for _ in range(distance):
-                nx, ny = ai.x + dx, ai.y + dy
-                
-                if not self.coord_in_bounds(nx, ny):
-                    break
-                cell = self.coord_to_cell(nx, ny)
-                
-                if not self.is_passable(cell):
-                    break
-                
-                ai.x, ai.y = nx, ny
-                cell.state = "explored"
-                cell.step_on()
-                if isinstance(cell.special_cell, cells.Exit):
-                    self.verdict = VERDICT_LOSE
-                    self.emit(events.VerdictReached(self.verdict))
-                    return
+            if self._move_ai(idx, ai, decision):
+                self._set_verdict(VERDICT_LOSE)
+                return
 
         self.aisteps += 1
-        if inable_counts >= len(self.ais) or self._check_win():
-            self.verdict = VERDICT_WIN
-            self.emit(events.VerdictReached(self.verdict))
+        
+        if stuck >= len(self.ais) or self._check_win():
+            # Verdict set in check win
             return
 
         for card in list(self.fetched):

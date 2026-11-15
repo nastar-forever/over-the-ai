@@ -24,7 +24,6 @@ class Animation(ABC):
     @abstractmethod
     def is_done(self) -> bool: ...
     
-    
 @dataclass
 class Tween(Animation):
     a: float

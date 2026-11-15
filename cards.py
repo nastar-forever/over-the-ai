@@ -18,7 +18,7 @@ class PlacementToken:
         self.shape = [list(r) for r in zip(*self.shape)][::-1]
     
     def flip(self):
-        self.shape = self.shape = [r[::-1] for r in self.shape]
+        self.shape = [r[::-1] for r in self.shape]
     
 
 @dataclass
