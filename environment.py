@@ -112,7 +112,7 @@ class Environment(_Environment):
         
         revealed = [*wall.cells, *wall.vuln_cells]
         if wall.outer is not None:
-            revealed +- wall.outer.vuln_cells
+            revealed += wall.outer.vuln_cells
             
         for cell in revealed:
             self._emit_cell(cell)
@@ -145,7 +145,6 @@ class Environment(_Environment):
             
             wall = cells.SMWall(level, ring_cells, rng=self.rng)
             wall.on_collapse = lambda w=wall: self._on_smwall_collapse(w)
-            self.emit(events.SMWallCollapsed(level))
             
             if self.sm_walls:
                 wall.outer = self.sm_walls[-1]
@@ -279,7 +278,7 @@ class Environment(_Environment):
             return False
         self._apply_action(card.on_activation(self.bank, self.fetched))
         self.fetched.remove(card)
-        self._emit_fetched("user")
+        self._emit_fetched("used")
         self._playerstep()
         return True
     
@@ -287,7 +286,8 @@ class Environment(_Environment):
         if self.active_placement is not None:
             return False
         
-        self.fetched = [self.rng.choice(self.pool)() for _ in range(self.fetch_size)]
+        pool = [c for c in self.pool if not c.get_from_recipes_only]
+        self.fetched = [self.rng.choice(pool)() for _ in range(self.fetch_size)]
         self._emit_fetched("shuffled")
         self._playerstep()
         return True
@@ -354,7 +354,7 @@ class Environment(_Environment):
         self.fetched[ovidx] = merged
         
         del self.fetched[idledidx]
-        self._emit(events.MergingHappened(list(self.fetched), c1, c2, merged))
+        self.emit(events.MergingHappened(list(self.fetched), c1, c2, merged))
         self._playerstep()
         
         return True
@@ -439,7 +439,8 @@ class Environment(_Environment):
                 
     
     def should_player_play(self):
-        return self.playersteps - self.last_playersteps < self.mstate.max_player_stepcount
+        return (self.active_placement is not None
+                or self.playersteps - self.last_playersteps < self.mstate.max_player_stepcount)
     
     @staticmethod
     def _is_player_block(cell: cells.Cell) -> bool:
@@ -554,9 +555,12 @@ class Environment(_Environment):
                 return
 
         self.aisteps += 1
-        
-        if stuck >= len(self.ais) or self._check_win():
-            # Verdict set in check win
+        self.last_playersteps = self.playersteps
+
+        if stuck >= len(self.ais):
+            self._set_verdict(VERDICT_WIN)
+            return
+        if self._check_win():
             return
 
         for card in list(self.fetched):

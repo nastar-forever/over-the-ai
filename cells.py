@@ -129,5 +129,7 @@ class SMWall:
             cell.special_cell = child
             future = isinstance(child, Vulnerability) and child.wall is not None and not child.wall.active
             cell.state = "locked" if future else "unexplored"
-            
+        
+        if self.outer is not None:
+            self.outer.activate()
         self.on_collapse()
