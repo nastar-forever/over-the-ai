@@ -57,7 +57,7 @@ class Card:
     def on_merging(self, merge: Card) -> ActionToken:
         return
     
-    def on_player_step(self, stepcount: int, max_stepcount: int) -> ActionToken:
+    def on_player_step(self, total_playersteps: int, stepcount: int, max_stepcount: int) -> ActionToken:
         return
     
     def on_ai_step(self, aistepcount: int) -> ActionToken:

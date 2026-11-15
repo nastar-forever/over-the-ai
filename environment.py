@@ -21,7 +21,7 @@ UNPLACEABLE_CELLS = (cells.Obstacle, cells.Vulnerability, cells.VulnerabilitySte
 @dataclass
 class ModdableEnvAttrs:
     show_ai_minds: bool = False
-    max_playersteps: int = 3
+    max_player_stepcount: int = 3
     ai_movement_modes: list[Literal["walk", "dash"]] = ["walk", "dash"]
     banned_cards: list[cards.Card] = []
 
@@ -60,6 +60,7 @@ class Environment(_Environment):
         self.active_placement: cards.PlacementToken = None
         
         self.playersteps = 0
+        self.aisteps = 0
         self.last_playersteps = 0
         self.verdict = VERDICT_HOLD
         
@@ -181,7 +182,9 @@ class Environment(_Environment):
 
 
     # PLAYER ACTIONS
-    def _apply_action(self, token: cards.ActionToken):
+    def _apply_action(self, token: cards.ActionToken|None):
+        if token is None:
+            return
         self.fetched = [fcard for fcard in self.fetched if not fcard in token.remove_cards]
         self.fetched.extend([card() for card in token.add_cards])
         self.active_placement = token.do_placement
@@ -204,6 +207,7 @@ class Environment(_Environment):
 
     def _playerstep(self):
         self.playersteps += 1
+                
         for mod in self.active_temp_mods.values():
             attr = mod.target_attr
             steps_passed = self.playersteps - mod.effective_since
@@ -215,6 +219,9 @@ class Environment(_Environment):
             
             if mod.target_op is not None and not mod.op_only_once:
                 setattr(self.mstate, attr, mod.target_op(getattr(self.mstate, attr)))
+                
+        for card in self.fetched:
+            act = card.on_player_step(self.playersteps, self.playersteps - self.last_playersteps, self.mstate.max_player_stepcount)
         
     
     def play_card(self, card: cards.Card) -> bool:
@@ -319,10 +326,11 @@ class Environment(_Environment):
                 
     
     def should_player_play(self):
-        return self.playersteps - self.last_playersteps <= self.mstate.max_playersteps
+        return self.playersteps - self.last_playersteps <= self.mstate.max_player_stepcount
     
     def aistep(self):
         inable_counts = 0
+        self.last_playersteps = self.playersteps
         
         for ai in self.ais:
             # CHECK WHETHER THE AI ENCAPSULATED YET
@@ -367,3 +375,7 @@ class Environment(_Environment):
         if inable_counts >= len(self.ais) - 1:
             self.verdict = VERDICT_WIN
             return
+        
+        for card in self.fetched:
+            act = card.on_ai_step(self.playersteps / 3)
+            self._apply_action(act)
