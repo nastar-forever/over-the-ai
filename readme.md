@@ -30,4 +30,4 @@ Apparently, NVAI made their sandbox with at least decent level of effort. So the
 This project written in Python, using PyGame and bagged into an HTML5 website by using PyInstaller. All done in Visual Studio Code.
 
 # How to play it?
-Or... you could just install the release [here](https://). Download the zip file, extract it, and run over-the-ai.exe.
+You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
