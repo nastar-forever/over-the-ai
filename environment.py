@@ -11,6 +11,7 @@ from _base import _Environment
 import baseai
 import cards
 import cells
+from render import events
 
 VERDICT_HOLD = 0
 VERDICT_WIN = 1
@@ -58,12 +59,20 @@ class Environment(_Environment):
         self.fetched: list[cards.Card] = []
         self.active_temp_mods: dict[str, cards.TempModificationToken] = {}
         self.active_placement: cards.PlacementToken = None
+        self.events: list[events.GameEvent] = []
         
         self.playersteps = 0
         self.aisteps = 0
         self.last_playersteps = 0
         self.verdict = VERDICT_HOLD
         
+    def emit(self, event: events.GameEvent):
+        self.events.append(event)
+        
+    def drain(self) -> list[events.GameEvent]:
+        evs, self.events = self.events, []
+        return evs
+    
     
     def coord_to_idx(self, x: int, y: int) -> int:
         return y * self.envsize + x
@@ -118,6 +127,8 @@ class Environment(_Environment):
             
             wall = cells.SMWall(level, ring_cells, rng=self.rng)
             wall.on_collapse = self._on_smwall_collapse
+            self.emit(events.SMWallCollapsed(level))
+            
             if self.sm_walls:
                 wall.outer = self.sm_walls[-1]
             self.sm_walls.append(wall)
@@ -208,7 +219,7 @@ class Environment(_Environment):
                 val = mod.target_op(val)
             
             setattr(self.mstate, attr, val)
-            mod.effective_since += self.playersteps
+            mod.effective_since = self.playersteps + mod.effective_offset
             self.active_temp_mods[attr] = mod
 
 
@@ -414,6 +425,7 @@ class Environment(_Environment):
     def _check_win(self) -> bool:
         if self.are_ais_isolated() or self.are_ais_starved():
             self.verdict = VERDICT_WIN
+            self.emit(events.VerdictReached(self.verdict))
             return True
         return False
         
@@ -449,11 +461,13 @@ class Environment(_Environment):
                 cell.step_on()
                 if isinstance(cell.special_cell, cells.Exit):
                     self.verdict = VERDICT_LOSE
+                    self.emit(events.VerdictReached(self.verdict))
                     return
 
         self.aisteps += 1
         if inable_counts >= len(self.ais) or self._check_win():
             self.verdict = VERDICT_WIN
+            self.emit(events.VerdictReached(self.verdict))
             return
 
         for card in list(self.fetched):

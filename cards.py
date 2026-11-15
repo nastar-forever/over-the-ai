@@ -29,7 +29,8 @@ class TempModificationToken:
     duration: int
     op_only_once: bool = True
     update_dur_on_recast: bool = True
-    effective_since: int = 0
+    effective_offset: int = 0
+    effective_since: int|None = None
     original_value: Any|None = None
     
     def __post_init__(self):
