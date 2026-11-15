@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections import deque
 from typing import Literal
 
@@ -32,7 +32,7 @@ class Environment(_Environment):
         envsize: int,
         wall_rings: tuple[int],
         ais: list[baseai.BaseAI],
-        pool: list[type[cards.Card]],
+        pool: list[list[cards.Card, int]],
         fetch_size: int = 4,
         rng: random.Random|None = None,
         bank_limit: int = 4
@@ -67,6 +67,8 @@ class Environment(_Environment):
         self.aisteps = 0
         self.last_playersteps = 0
         self.verdict = VERDICT_HOLD
+        self._pending: tuple[cards.Card, cards.ActionToken]|None = None
+        self.reroll(free=True)
         
     def emit(self, event: events.GameEvent):
         self.events.append(event)
@@ -271,26 +273,68 @@ class Environment(_Environment):
                     self.playersteps, self.playersteps - self.last_playersteps,
                     self.mstate.max_player_stepcount
                 ))
+        self._refill_if_empty()
         
     
-    def play_card(self, card: cards.Card) -> bool:
+    def play_card(self, card) -> bool:
         if self.active_placement is not None or isinstance(card, tuple(self.mstate.banned_cards)):
             return False
-        self._apply_action(card.on_activation(self.bank, self.fetched))
+        action = card.on_activation(self.bank, self.fetched)
+        
+        if action is not None and action.do_placement is not None:
+            self.active_placement = action.do_placement
+            self._pending = (card, action)
+            return True
+
+        self._apply_action(action)
         self.fetched.remove(card)
         self._emit_fetched("used")
         self._playerstep()
         return True
+
+    def cancel_placement(self) -> bool:
+        if self._pending is None:
+            return False
+        self.active_placement = None
+        self._pending = None
+        return True
+
+    def _commit_pending(self):
+        if self._pending is None:
+            return
+        
+        card, action = self._pending
+        self._pending = None
+        self._apply_action(replace(action, do_placement=None))
+        
+        if card in self.fetched:
+            self.fetched.remove(card)
+        
+        self._emit_fetched("used")
+        self._playerstep()
     
-    def reroll(self) -> bool:
+    
+    def _draw_hand(self) -> list[cards.Card]:
+        entries = [(c, w) for c, w in self.pool if w > 0 and not c.get_from_recipes_only]
+        classes, weights = zip(*entries)
+        
+        return [c() for c in self.rng.choices(classes, weights=weights, k=self.fetch_size)]
+
+    def reroll(self, free: bool = False) -> bool:
         if self.active_placement is not None:
             return False
         
-        pool = [c for c in self.pool if not c.get_from_recipes_only]
-        self.fetched = [self.rng.choice(pool)() for _ in range(self.fetch_size)]
+        self.fetched = self._draw_hand()
         self._emit_fetched("shuffled")
-        self._playerstep()
+        
+        if not free:
+            self._playerstep()
         return True
+
+    def _refill_if_empty(self):
+        if not self.fetched and self.active_placement is None:
+            self.reroll(free=True)
+    
     
     def transfer(self, card: cards.Card) -> bool:
         if self.active_placement is not None:
@@ -360,37 +404,37 @@ class Environment(_Environment):
         return True
         
         
-    def place(self, x: int, y: int) -> bool:
-        if self.active_placement is None:
+    @staticmethod
+    def shape_coords(shape, x, y) -> list[tuple[int, int]]:
+        return [(x + ox, y + oy) for oy, row in enumerate(shape) for ox, b in enumerate(row) if b]
+
+    def can_place(self, x: int, y: int, token=None) -> bool:
+        token = token or self.active_placement
+        if token is None:
             return False
-        shape = self.active_placement.shape
         
-        if (
-            x < 0 or y < 0
-            or x + len(shape[0]) > self.envsize
-            or y + len(shape) > self.envsize
-        ): return False
-        
-        affected_cells = [
-            self.coord_to_cell(x + ox, y + oy)
-            for oy, row in enumerate(shape)
-            for ox, b in enumerate(row)
-            if b
-        ]
-        
-        for cell in affected_cells:
-            if self.active_placement.type != "flush" and cell.state == "explored":
+        shape = token.shape
+        if x < 0 or y < 0 or x + len(shape[0]) > self.envsize or y + len(shape) > self.envsize:
+            return False
+
+        for cx, cy in self.shape_coords(shape, x, y):
+            cell = self.coord_to_cell(cx, cy)
+            if token.type != "flush" and cell.state == "explored":
                 return False
-            
-            if isinstance(cell.special_cell, UNPLACEABLE_CELLS):
+            sc = cell.special_cell
+            if isinstance(sc, UNPLACEABLE_CELLS):
                 return False
-            
-            if isinstance(cell.special_cell, cells.SMWallCell):
-                if isinstance(cell.special_cell.child, UNPLACEABLE_CELLS):
-                    return False
-        
+            if isinstance(sc, cells.SMWallCell) and isinstance(sc.child, UNPLACEABLE_CELLS):
+                return False
+        return True
+
+    def place(self, x: int, y: int) -> bool:
+        if not self.can_place(x, y):
+            return False
         token = self.active_placement
-        for cell in affected_cells:
+        
+        for cx, cy in self.shape_coords(token.shape, x, y):
+            cell = self.coord_to_cell(cx, cy)
             if token.type == "flush":
                 cell.state = "unexplored"
             elif isinstance(cell.special_cell, cells.SMWallCell):
@@ -401,6 +445,7 @@ class Environment(_Environment):
 
         self.active_placement = None
         self.emit(events.Placement(token))
+        self._commit_pending()
         return True
     
        
@@ -565,3 +610,7 @@ class Environment(_Environment):
 
         for card in list(self.fetched):
             self._apply_action(card.on_ai_step(self.aisteps))
+            
+    def end_turn(self):
+        if self.active_placement is None:
+            self.playersteps = max(self.playersteps, self.last_playersteps + self.mstate.max_player_stepcount)

@@ -26,11 +26,17 @@ class Viewport:
         self.offset = ((ww - int(lw * self.scale)) // 2, (wh - int(lh * self.scale)) // 2)
 
 
-    def fit_grid(self, n_cells: int, margin: int = 16):
+    def fit_grid(self, n_cells, margin=16):
         lw, lh = self.logical_size
         self.cell_size = (min(lw, lh) - 2 * margin) // n_cells
         side = self.cell_size * n_cells
-        self.grid_origin = ((lw - side) // 2, (lh - side) // 2)
+        self.grid_origin = (margin, (lh - side) // 2)
+
+
+    def convert(self, event):
+        if hasattr(event, "pos"):
+            return pygame.event.Event(event.type, {**event.dict, "pos": self.window_to_logical(event.pos)})
+        return event
 
 
     def window_to_logical(self, pos) -> tuple[int, int]:

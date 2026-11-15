@@ -8,10 +8,9 @@ from environment import Environment, VERDICT_HOLD
 from default_ais import BFSAI
 
 POOL = [
-    cards.Stone,
-    cards.Wall,
-    cards.Edge,
-    cards.GreatWall
+    [cards.Stone, 10],
+    [cards.Wall, 6],
+    [cards.Edge, 3],
 ]
 
 def run(seed, size=15, rings=(1, 3), max_steps=500, verbose=False):
