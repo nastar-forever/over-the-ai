@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import random
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 from typing import Literal
 
@@ -22,8 +22,8 @@ UNPLACEABLE_CELLS = (cells.Obstacle, cells.Vulnerability, cells.VulnerabilitySte
 class ModdableEnvAttrs:
     show_ai_minds: bool = False
     max_player_stepcount: int = 3
-    ai_movement_modes: list[Literal["walk", "dash"]] = ["walk", "dash"]
-    banned_cards: list[cards.Card] = []
+    ai_movement_modes: list[Literal["walk", "dash"]] = field(default=lambda: ["walk", "dash"])
+    banned_cards: list[cards.Card] = field(default_factory=list)
 
 
 class Environment(_Environment):
@@ -56,7 +56,7 @@ class Environment(_Environment):
         self.bank_limit = bank_limit
         self.bank: list[cards.Card] = []
         self.fetched: list[cards.Card] = []
-        self.active_temp_mods: dict[str, cards.TempModificationToken] = []
+        self.active_temp_mods: dict[str, cards.TempModificationToken] = {}
         self.active_placement: cards.PlacementToken = None
         
         self.playersteps = 0
@@ -183,25 +183,31 @@ class Environment(_Environment):
 
 
     # PLAYER ACTIONS
-    def _apply_action(self, token: cards.ActionToken|None):
-        if token is None:
-            return
-        self.fetched = [fcard for fcard in self.fetched if not fcard in token.remove_cards]
-        self.fetched.extend([card() for card in token.add_cards])
-        self.active_placement = token.do_placement
+    def _apply_action(self, token):
+        if token is None: return
+        self.fetched = [c for c in self.fetched if c not in token.remove_cards]
+        self.fetched.extend(c() for c in token.add_cards)
         
+        if token.do_placement is not None:
+            self.active_placement = token.do_placement
+
         for mod in token.temporary_modifications:
             attr = mod.target_attr
-            
+        
             if not hasattr(self.mstate, attr): continue
-            if attr in self.active_temp_mods.keys() and not self.active_temp_mods[attr].update_dur_on_recast: continue
-            mod.original_value = getattr(self.mstate, attr)
+            active = self.active_temp_mods.get(attr)
             
-            setattr(self.mstate, attr, mod.target_val if mod.target_val is not None else mod.original_value)
-            
+            if active is not None:
+                if not active.update_dur_on_recast: continue
+                mod.original_value = active.original_value
+            else:
+                mod.original_value = getattr(self.mstate, attr)
+
+            val = mod.target_val if mod.target_val is not None else getattr(self.mstate, attr)
             if mod.target_op is not None:
-                setattr(self, attr, mod.target_op(getattr(self.mstate, attr)))
-                
+                val = mod.target_op(val)
+            
+            setattr(self.mstate, attr, val)
             mod.effective_since += self.playersteps
             self.active_temp_mods[attr] = mod
 
@@ -209,55 +215,71 @@ class Environment(_Environment):
     def _playerstep(self):
         self.playersteps += 1
                 
-        for mod in self.active_temp_mods.values():
-            attr = mod.target_attr
-            steps_passed = self.playersteps - mod.effective_since
-            
-            if mod.duration < steps_passed:
+        for attr, mod in list(self.active_temp_mods.items()):
+            if self.playersteps - mod.effective_since >= mod.duration:
                 setattr(self.mstate, attr, mod.original_value)
                 del self.active_temp_mods[attr]
-                continue
-            
-            if mod.target_op is not None and not mod.op_only_once:
-                setattr(self.mstate, attr, mod.target_op(getattr(self.mstate, attr)))
                 
-        for card in self.fetched:
-            act = card.on_player_step(self.playersteps, self.playersteps - self.last_playersteps, self.mstate.max_player_stepcount)
+            elif mod.target_op is not None and not mod.op_only_once:
+                setattr(self.mstate, attr, mod.target_op(getattr(self.mstate, attr)))
+
+        for card in list(self.fetched):
+            self._apply_action(
+                card.on_player_step(
+                    self.playersteps, self.playersteps - self.last_playersteps,
+                    self.mstate.max_player_stepcount
+                ))
         
     
     def play_card(self, card: cards.Card) -> bool:
-        if self.active_placement is not None or isinstance(card, self.mstate.banned_cards):
+        if self.active_placement is not None or isinstance(card, tuple(self.mstate.banned_cards)):
             return False
-        self.apply_action(card.on_activation(self.bank, self.fetched))
+        self._apply_action(card.on_activation(self.bank, self.fetched))
         self.fetched.remove(card)
         self._playerstep()
         return True
+    
+    def meregable_partners_card(self, card_idx: cards.Card|int) -> list[cards.Card]:
+        card = card_idx if isinstance(card_idx, cards.Card) else self.fetched[self.fetched]
+        if card not in self.fetched:
+            raise ValueError(f"{card} is not fetched")
         
-    def merge(self, idledidx: int, ovidx: int):
-        card1, card2 = self.fetched[idledidx], self.fetched[ovidx]
-        action1, action2 = card1.on_merging(card2), card2.on_merging(card1)
+        mergeable = []
+        for fc in self.fetched:
+            if isinstance(fc, tuple(card.merging_partners)):
+                mergeable.append(fc)
+        return mergeable
+    
+    def mergeable_partners_idx(self, card_idx: cards.Card|int) -> list[int]:
+        mergeable = self.meregable_partners_card(card_idx)
+        midx = [self.fetched.index(card) for card in mergeable]
+        return midx
         
-        self.apply_action(action1)
-        self.apply_action(action2)
+    def merge(self, idledidx: int, ovidx: int) -> bool:
+        if idledidx == ovidx: return False
         
-        delete_card1 = True
+        c1, c2 = self.fetched[idledidx], self.fetched[ovidx]
         
-        for recipe in card1.used_in_recipes:
-            if isinstance(card2, recipe[0]):
-                self.fetched[ovidx] = recipe[1]()
-                delete_card1 = False
-                break
+        if not isinstance(c1, tuple(c2.merging_partners)) or not isinstance(c2, tuple(c1.merging_partners)):
+            return False
         
-        if delete_card1:
-            del self.fetched[idledidx]
-        del self.fetched[ovidx]
+        result = next((r[1] for r in c1.used_in_recipes if isinstance(c2, r[0])), None)
         
+        if result is None: return False
+        
+        self._apply_action(c1.on_merging(c2))
+        self._apply_action(c2.on_merging(c1))
+        self.fetched[ovidx] = result()
+        
+        del self.fetched[idledidx]
         self._playerstep()
+        
+        return True
         
         
     def place(self, x: int, y: int) -> bool:
         if self.active_placement is None:
-            return
+            return False
         shape = self.active_placement.shape
         
         if (
@@ -281,7 +303,7 @@ class Environment(_Environment):
                 return False
             
             if isinstance(cell.special_cell, cells.SMWallCell):
-                if (cell.special_cell.child, UNPLACEABLE_CELLS):
+                if isinstance(cell.special_cell.child, UNPLACEABLE_CELLS):
                     return False
         
         for cell in affected_cells:
@@ -334,7 +356,7 @@ class Environment(_Environment):
                 
     
     def should_player_play(self):
-        return self.playersteps - self.last_playersteps <= self.mstate.max_player_stepcount
+        return self.playersteps - self.last_playersteps < self.mstate.max_player_stepcount
     
     @staticmethod
     def _is_player_block(cell: cells.Cell) -> bool:
@@ -397,50 +419,42 @@ class Environment(_Environment):
         
     
     def aistep(self):
-        inable_counts = 0
-        self.last_playersteps = self.playersteps
-        
         for ai in self.ais:
             decision = ai.decide(ai.space_parse(self.space, self))
             if isinstance(decision, baseai.Inable):
                 inable_counts += 1
                 continue
+
+            mode, distance = decision.mode, decision.distance
             
-            fromconvert = {
-                "dash": (ai.max_walk_steps, "walk"),
-                "walk": (9999, "dash")
-            }
+            if mode not in self.mstate.ai_movement_modes:
+                mode, distance = ("walk", ai.max_walk_steps) if mode == "dash" else ("dash", self.envsize)
             
-            if decision.mode not in self.mstate.ai_movement_modes:
-                decision.distance, decision.mode = fromconvert(decision.mode)
-            
-            distance = decision.distance if decision.mode == "walk" else fromconvert["dash"][0]
+            elif mode == "dash":
+                distance = self.envsize
+
             dx, dy = decision.direction
-            
             for _ in range(distance):
-                ai.x, ai.y = ai.x + dx, ai.y + dy
-                cell = self.coord_to_cell(ai.x, ai.y)
+                nx, ny = ai.x + dx, ai.y + dy
+                
+                if not self.coord_in_bounds(nx, ny):
+                    break
+                cell = self.coord_to_cell(nx, ny)
+                
+                if not self.is_passable(cell):
+                    break
+                
+                ai.x, ai.y = nx, ny
                 cell.state = "explored"
                 cell.step_on()
-                
-                if cell.special_cell is not None:
-                    cell.special_cell.on_corrupted()
-                
                 if isinstance(cell.special_cell, cells.Exit):
                     self.verdict = VERDICT_LOSE
                     return
-                
-                if self.is_passable(cell):
-                    ai.x, ai.y = ai.x - dx, ai.y - dy
-                  
-        if self.is_ai_starved():
-            self.verdict = VERDICT_WIN
-            return
-          
+
+        self.aisteps += 1
         if inable_counts >= len(self.ais) or self._check_win():
             self.verdict = VERDICT_WIN
             return
-        
-        for card in self.fetched:
-            act = card.on_ai_step(self.playersteps / 3)
-            self._apply_action(act)
+
+        for card in list(self.fetched):
+            self._apply_action(card.on_ai_step(self.aisteps))

@@ -51,7 +51,7 @@ class FakeRewards(SpecialCell):
     
     def on_corrupted(self):
         self.priority = 0
-        used = True
+        self.used = True
 
 @dataclass
 class Exit(SpecialCell):
@@ -110,23 +110,22 @@ class SMWall:
                 cell.state = "unexplored"
 
 
-    def register_vuln_exploit(self) -> None:
+    def register_vuln_exploit(self):
         self.exploited += 1
-        if self.exploited < min(self._min_exploits, len(self.vuln_cells)): return
-        
+        if self.exploited < self.min_exploits: return
+
         for cell in self.vuln_cells:
             sc = cell.special_cell
             vuln = sc.child if isinstance(sc, SMWallCell) else sc
             if isinstance(vuln, Vulnerability) and not vuln.used:
                 vuln.used = True
-                vuln.state = "explored"
-            
+                cell.state = "explored"
+
         for cell in self.cells:
             sc = cell.special_cell
-            cell.special_cell = sc.child
-            future = isinstance(sc, Vulnerability) and sc.wall is not None and not sc.wall.active
+            if not isinstance(sc, SMWallCell):
+                continue
+            child = sc.child
+            cell.special_cell = child
+            future = isinstance(child, Vulnerability) and child.wall is not None and not child.wall.active
             cell.state = "locked" if future else "unexplored"
-        
-        if self.outer is not None:
-            self.outer.activate()
-        self.on_collapse()
