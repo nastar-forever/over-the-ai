@@ -40,20 +40,34 @@ class Move(Animation):
         self.speed = self.DASH_SPEED if ev.mode == "dash" else self.WALK_SPEED
         self.t = 0.0 # progress, in cells
         self._revealed = 0
+        self.triggers: dict[int, list[tuple[int, int]]] = {}  # path index -> extra cells to un-hide
+
+
+    def attach(self, coords, trigger_cell, cfdata):
+        """Hide `coords` now, and un-hide them when the AI enters `trigger_cell`."""
+        try:
+            idx = self.ev.path.index(trigger_cell)
+        except ValueError:
+            idx = self.n
+        self.triggers.setdefault(idx, []).extend(coords)
+        cfdata.hidden_cells.update(coords)
+
 
     def on_queued(self, cfdata):
-        # keep the AI drawn at its old spot; don't override if an earlier Move already did
         cfdata.ai_pos.setdefault(self.ev.ai_idx, pygame.Vector2(self.ev.path[0]))
+
 
     def update(self, dt, cfdata):
         self.t = min(self.t + dt * self.speed, self.n)
         i = int(self.t)
-        while self._revealed < i: # un-hide cells as the AI enters them
+        while self._revealed < i:
             self._revealed += 1
             cfdata.hidden_cells.discard(self.ev.path[self._revealed])
+            cfdata.hidden_cells.difference_update(self.triggers.get(self._revealed, ()))
         a = pygame.Vector2(self.ev.path[i])
         b = pygame.Vector2(self.ev.path[min(i + 1, self.n)])
         cfdata.ai_pos[self.ev.ai_idx] = a.lerp(b, self.t - i)
+
 
     def is_done(self):
         return self.t >= self.n
@@ -106,20 +120,34 @@ class AnimationPlayer:
         self.queue.append(a)
 
     def push_events(self, evs, env, cfdata):
-        batch = [] # consecutive CellChanged -> one Reveal
+        batch = []
+        move = None
+        collapse = None
+
         def flush():
             if batch:
                 self._add(Reveal(list(batch)), cfdata)
                 batch.clear()
 
         for ev in evs:
+            if isinstance(ev, events.SMWallCollapsed):
+                collapse = ev
+                continue
+
             if isinstance(ev, events.CellChanged):
+                if collapse is not None and move is not None:
+                    move.attach(collapse.cells, (ev.x, ev.y), cfdata)
+                    collapse = None
                 batch.append((ev.x, ev.y))
                 continue
+
             flush()
             factory = ANIM_BY_EVENT.get(type(ev))
             if factory:
-                self._add(factory(ev, env), cfdata)
+                anim = factory(ev, env)
+                self._add(anim, cfdata)
+                if isinstance(anim, Move):
+                    move = anim
         flush()
 
     def update(self, dt, cfdata):

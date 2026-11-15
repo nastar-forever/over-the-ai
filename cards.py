@@ -98,3 +98,7 @@ class Stone(PlacementCard):
     def __post_init__(self):
         self.used_in_recipes = [[Stone, Wall], [Wall, Edge]]
         self.merging_partners = [Stone, Wall]
+
+class Lure(PlacementCard):
+    token = PlacementToken([[True]], special_cell=cells.FakeRewards)
+    card_category = "manipulation"

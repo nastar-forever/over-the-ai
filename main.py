@@ -2,12 +2,13 @@ import asyncio
 import pygame
 
 import cells, cards
+from view.theme import Theme
 from environment import Environment
 from default_ais import BFSAI
 from view import assets
 from view.controller import GameController
 from view.viewport import Viewport
-from view.renderers import RenderContext, GridRenderer, AIRenderer, GhostRenderer, WallLabelRenderer
+from view.renderers import RenderContext, GridRenderer, AIRenderer, GhostRenderer, WallLabelRenderer, VerdictRenderer
 from view.widgets import (
     HandView, Button, PlacementInput, TextPanel, RerollRequest, EndTurnRequest, ReplayRequest
 )
@@ -17,6 +18,7 @@ POOL = [
     [cards.Stone, 10],
     [cards.Wall, 6],
     [cards.Edge, 3],
+    [cards.Lure, 1]
 ]
 
 def make_env():
@@ -34,29 +36,29 @@ def overlay(draw):
 
 
 def draw_wall(s):
-    s.fill((135, 135, 160)); pygame.draw.rect(s, (95, 95, 120), s.get_rect(), 2)
+    s.fill(Theme.WALL_FILL); pygame.draw.rect(s, Theme.WALL_BORDER, s.get_rect(), 2)
 
 
-def draw_obstacle(s):       # user-placed block: bright border so it reads over an SM wall
-    pygame.draw.rect(s, (235, 235, 245), (3, 3, 26, 26), border_radius=4)
-    pygame.draw.rect(s, (25, 25, 32), (6, 6, 20, 20), border_radius=3)
+def draw_obstacle(s):
+    pygame.draw.rect(s, Theme.OBSTACLE_OUTER, (3, 3, 26, 26), border_radius=4)
+    pygame.draw.rect(s, Theme.OBSTACLE_INNER, (6, 6, 20, 20), border_radius=3)
 
 
 def draw_vuln(s):
-    pygame.draw.circle(s, (255, 255, 255), (16, 16), 11)
-    pygame.draw.circle(s, (235, 140, 30), (16, 16), 9)
+    pygame.draw.circle(s, Theme.VULN_OUTER, (16, 16), 11)
+    pygame.draw.circle(s, Theme.VULN_INNER, (16, 16), 9)
 
 
 def draw_sterile(s):
-    s.fill((90, 200, 255, 55)); pygame.draw.rect(s, (90, 200, 255, 130), s.get_rect(), 1)
+    s.fill(Theme.STERILE_FILL); pygame.draw.rect(s, Theme.STERILE_BORDER, s.get_rect(), 1)
 
 
 def draw_lure(s):
-    pygame.draw.polygon(s, (210, 80, 210), [(16, 4), (28, 16), (16, 28), (4, 16)])
+    pygame.draw.polygon(s, Theme.LURE, [(16, 4), (28, 16), (16, 28), (4, 16)])
 
 
-def darken(surf): surf.fill((150, 150, 150), special_flags=pygame.BLEND_RGB_MULT)
-def dim(surf):    surf.fill((180, 180, 180), special_flags=pygame.BLEND_RGB_MULT)
+def darken(surf): surf.fill(Theme.LOCKED_MULT, special_flags=pygame.BLEND_RGB_MULT)
+def dim(surf):    surf.fill(Theme.EXPLORED_MULT, special_flags=pygame.BLEND_RGB_MULT)
 
 
 CONTROLS = [
@@ -78,26 +80,26 @@ async def main():
     vp.fit_grid(controller.env.envsize)
 
     grid = GridRenderer(
-        emptytile=flat((50, 55, 70)),
+        emptytile=flat(Theme.TILE_EMPTY),
         sctile={
             cells.SMWallCell: overlay(draw_wall),
             cells.Obstacle: overlay(draw_obstacle),
             cells.Vulnerability: overlay(draw_vuln),
             cells.VulnerabilitySterileZone: overlay(draw_sterile),
             cells.FakeRewards: overlay(draw_lure),
-            cells.Exit: flat((60, 200, 90)),
+            cells.Exit: flat(Theme.TILE_EXIT),
         },
         filters={"locked": darken, "explored": dim, "unexplored": lambda s: None},
     )
     
-    renderers = [grid, WallLabelRenderer(), AIRenderer(), GhostRenderer()]
+    renderers = [grid, WallLabelRenderer(), AIRenderer(), GhostRenderer(), VerdictRenderer(lambda: controller.busy)]
     ctx = RenderContext(logical, vp, assets.Assets(), controller.cfdata)
 
     px = vp.grid_origin[0] + vp.cell_size * controller.env.envsize + 16
     pw = LOGICAL[0] - px - 16
     ui = [
         PlacementInput(vp),
-        HandView(pygame.Rect(px, 16, pw, 264), lambda: controller.cfdata.hand),
+        HandView(pygame.Rect(px, 16, pw, 264), lambda: controller.cfdata.hand, lambda: controller.env.active_card),
         Button((px, 292, pw, 36), "Reroll (1 step)", RerollRequest()),
         Button((px, 336, pw, 36), "End turn", EndTurnRequest()),
         Button((px, 380, pw, 36), "Replay", ReplayRequest()),
@@ -125,7 +127,7 @@ async def main():
         env = controller.env                      # changes on Replay
         ctx.mouse = vp.window_to_logical(pygame.mouse.get_pos())
 
-        logical.fill((20, 20, 28))
+        logical.fill(Theme.BG)
     
         for r in renderers:
             r.draw(ctx, env)

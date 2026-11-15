@@ -110,14 +110,13 @@ class Environment(_Environment):
     def _on_smwall_collapse(self, wall: cells.SMWall):
         for ai in self.ais:
             ai.max_walk_steps += 1
-        self.emit(events.SMWallCollapsed(wall.level))
-        
+
         revealed = [*wall.cells, *wall.vuln_cells]
         if wall.outer is not None:
             revealed += wall.outer.vuln_cells
-            
-        for cell in revealed:
-            self._emit_cell(cell)
+
+        coords = list(dict.fromkeys(self.cell_to_coord(c) for c in revealed))
+        self.emit(events.SMWallCollapsed(wall.level, coords))
     
     
     def initiate_space(self):
@@ -163,6 +162,10 @@ class Environment(_Environment):
         if self.sm_walls:
             self.sm_walls[-1].activate()
     
+    
+    @property
+    def active_card(self) -> cards.Card | None:
+        return self._pending[0] if self._pending else None
     
     @staticmethod
     def _slot_is_free(cell: cells.Cell) -> bool:

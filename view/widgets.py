@@ -5,6 +5,7 @@ from typing import Literal
 import pygame
 
 from . import assets
+from .theme import Theme
 
 @dataclass
 class UIToken: pass
@@ -71,14 +72,15 @@ class Button(Widget):
             return self.token
 
     def draw(self, surf, assets):
-        pygame.draw.rect(surf, (90, 90, 120) if self.hover else (60, 60, 90), self.rect, border_radius=6)
-        label = assets.text(self.text, assets.font(None, 22), (255, 255, 255))
+        pygame.draw.rect(surf, Theme.BUTTON_HOVER if self.hover else Theme.BUTTON, self.rect, border_radius=6)
+        label = assets.text(self.text, assets.font(None, 22), Theme.TEXT)
         surf.blit(label, label.get_rect(center=self.rect.center))
 
 
 class HandView(Widget):
-    def __init__(self, area: pygame.Rect, get_cards, card_h=56, gap=8):
-        self.rect, self.get_cards, self.card_h, self.gap = area, get_cards, card_h, gap
+    def __init__(self, area: pygame.Rect, get_cards, get_active=lambda: None, card_h=56, gap=8):
+        self.rect, self.get_cards, self.get_active = area, get_cards, get_active
+        self.card_h, self.gap = card_h, gap
         self.hover: int | None = None
 
     def card_rects(self):
@@ -94,14 +96,21 @@ class HandView(Widget):
                 if r.collidepoint(event.pos):
                     return PlayCardRequest(i)
 
+
     def draw(self, surf, assets):
         font = assets.font(None, 22)
-        
+        active = self.get_active()
+
         for i, (card, r) in enumerate(zip(self.get_cards(), self.card_rects())):
-            base = CATEGORY_COLOR.get(card.card_category, (90, 90, 90))
-            color = tuple(min(255, c + 30) for c in base) if i == self.hover else base
+            if card is active:
+                color, text_color = Theme.CARD_ACTIVE, Theme.CARD_ACTIVE_TEXT
+            else:
+                base = Theme.CARD_COLORS.get(card.card_category, Theme.CARD_DEFAULT)
+                color = tuple(min(255, c + Theme.CARD_HOVER_BOOST) for c in base) if i == self.hover else base
+                text_color = Theme.TEXT
+
             pygame.draw.rect(surf, color, r, border_radius=8)
-            label = assets.text(type(card).__name__, font, (255, 255, 255))
+            label = assets.text(type(card).__name__, font, text_color)
             surf.blit(label, label.get_rect(midleft=(r.x + 12, r.centery)))
 
 
@@ -131,14 +140,14 @@ class TextPanel(Widget):
     def handle(self, event): return None
 
     def draw(self, surf, assets):
-        pygame.draw.rect(surf, (32, 34, 46), self.rect, border_radius=8)
+        pygame.draw.rect(surf, Theme.PANEL_BG, self.rect, border_radius=8)
         font = assets.font(None, 20)
-        surf.blit(assets.text(self.title, font, (170, 175, 200)), (self.rect.x + 10, self.rect.y + 8))
-        
+        surf.blit(assets.text(self.title, font, Theme.PANEL_TITLE), (self.rect.x + 10, self.rect.y + 8))
+
         for i, (key, desc) in enumerate(self.rows):
             y = self.rect.y + 32 + i * 20
-            surf.blit(assets.text(key, font, (255, 220, 120)), (self.rect.x + 10, y))
-            surf.blit(assets.text(desc, font, (210, 210, 220)), (self.rect.x + 104, y))
+            surf.blit(assets.text(key, font, Theme.PANEL_KEY), (self.rect.x + 10, y))
+            surf.blit(assets.text(desc, font, Theme.PANEL_DESC), (self.rect.x + 104, y))
 
 
 class CardView(Widget): ...

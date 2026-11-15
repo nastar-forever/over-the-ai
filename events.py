@@ -21,6 +21,7 @@ class CellChanged(GameEvent):
 @dataclass
 class SMWallCollapsed(GameEvent):
     level: int
+    cells: list[tuple[int, int]]
     
     
 @dataclass
