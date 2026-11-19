@@ -1,109 +1,208 @@
+from __future__ import annotations
+
 import math
 import pygame
 
 from typing import Literal, Callable, ClassVar
+from dataclasses import dataclass, Field
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
-import assets
+import game.nueue_view.asset as asset
 
 
 @dataclass
-class AnimationFrame:
-    surface: assets.SurfacesContainer
+class _AnimationCtxFrame:
     postype: Literal["absolute", "relative"] = "relative"
     position: tuple[int, int] = (0, 0)
-
-
-class Animation(ABC, assets._PrimitiveRenderer):
+    variant: int = 0
+    
+class Animation(ABC):
     @property
     def would_loop(self) -> bool:
         return False
     
-    @property
+    @abstractmethod
+    def update(self, start: float, curr: float) -> _AnimationCtxFrame: ...
+    @abstractmethod
+    def get(self) -> _AnimationCtxFrame: ...
     @abstractmethod
     def is_done(self) -> bool: ...
-    
     @abstractmethod
-    def update(self, start_time: float, current_time: float, dt: float) -> AnimationFrame: ...
-    
-    def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]):
-        frame = self.update()
-        orig = origin if frame.postype == "relative" else (0, 0)
-        pos = (orig[i] + frame.position[i] for i in range(2))
-        parent_surface.blit(frame.surface.get(), pos)
+    def reset(self) -> None: ...
 
 class LoopingAnimation(Animation):
     @property
-    def would_loop(self) -> bool:
+    def would_loop(self):
         return True
     
-    @property
-    def is_done(self) -> bool|None:
-        return None
-
+    def is_done(self):
+        return False
+    
     
 @dataclass
 class SpriteAnim(LoopingAnimation):
-    spritesheet: assets.SurfacesContainer
+    frame_counts: int
     frame_duration: float
-    since_last: ClassVar[float] = 0
-        
-    def update(self, start, curr, _):
-        if curr - self.since_last >= self.frame_duration:
-            self.spritesheet.variant = (self.spritesheet.variant + 1) % self.spritesheet.variants_count
-            self.since_last = curr
-        
-        return AnimationFrame(
-            self.spritesheet
-        )
-        
+    _since_last: ClassVar[float] = 0
+    _curr_frame: ClassVar[int] = 0
+    
+    def update(self, _, curr):
+        if curr - self._since_last >= self.frame_duration:
+            self._curr_frame = (self._curr_frame + 1) % self.frame_counts
+            
+        return _AnimationCtxFrame(variant=self._curr_frame)
+    
+    def get(self):
+        return _AnimationCtxFrame(variant=self._curr_frame)
+    
+    def reset(self):
+        self._curr_frame = 0
+        self._since_last = 0    
+    
 
 linear = lambda t: t
 ease_out = lambda t: 1 - (1 - t) ** 3
 
-
 @dataclass
 class TweenAnim(Animation):
-    sprite: assets.SurfacesContainer
-    tween_from: tuple[int, int]
-    tween_to: tuple[int, int]
+    sprite: asset.SurfacesContainer
     duration: float
-    ease_func: Callable[[float], float] = linear
+    tween_to: tuple[int, int]
+    tween_from: tuple[int, int] = Field(default=(0, 0))
+    ease_func: Callable[[float], float] = Field(default=linear)
+    postype: Literal["absolute", "relative"] = "relative"
+    _lerped = ClassVar[tuple[int, int]] = None
     
-    def update(self, start, curr, _):
+    def __post_init__(self):
+        self._lerped = self.tween_from
+    
+    def update(self, start, curr):
         t = min((start - curr) / self.duration, 1)
-        lerped = (self.tween_from[i] + (self.tween_to[i] - self.tween_from[i]) * self.ease_func(t) for i in range(2))
+        self._lerped = (self.tween_from[i] + (self.tween_to[i] - self.tween_from[i]) * self.ease_func(t) for i in range(2))
         
-        return AnimationFrame(
-            self.sprite,
-            "absolute",
-            lerped
-        )        
-
-@dataclass
-class BlockyTweenAnim(Animation):
-    sprite: assets.SurfacesContainer
-    tween_from: tuple[int, int]
-    tween_to: tuple[int, int]
-    duration: float
-    block_dim: tuple[int, int]
+        return _AnimationCtxFrame(
+            self.postype,
+            self._lerped
+        )
     
-    def update(self, start, curr, _):
-        elapsed = curr - start
-        t = min(elapsed / self.duration, 1)
-        ps = self.tween_from
-        pt = self.tween_to
+    def get(self):
+        return _AnimationCtxFrame(self.postype, self._lerped)
+    
+    def reset(self):
+        self._lerped = self.tween_from
+
+
+class _AnimationPlayer(ABC):
+    def __init__(self):
+        self.starttime = 0
+        self.playing = False
+    
+    def start(self, time: float|None):
+        self.starttime = time or pygame.time.get_ticks()
+        self.playing = True
+    
+    @staticmethod
+    def fallback() -> _AnimationCtxFrame: return _AnimationCtxFrame()
+    def is_done(self) -> bool: ...
+    
+    def update(self) -> _AnimationCtxFrame: ...
+    
+    def __call__(self):
+        if self.is_done():
+            self.stop()
+            return self.fallback()
         
-        sign = lambda x: (x > 0) - (x < 0)
+        if not self.playing:
+            return self.fallback()
         
-        newpos = (
-            sign(pt[i] - ps[i]) + math.floor(abs((pt[i] - ps[i]) * t) / self.block_dim[i])
-            for i in range(2)
-        )
+        ret = self.update()
+        return ret
+    
+
+    @abstractmethod
+    def get(self) -> _AnimationCtxFrame: ...
+    
+    @abstractmethod
+    def reset(self): ...
+
+    def stop(self):
+        self.starttime = 0
+        self.playing = True
+        self.reset()
+    
+
+class GeneralAnimationPlayer(_AnimationPlayer):
+    def __init__(self, animation: Animation):
+        super().__init__()
+        self.animation = animation
+    
+    def is_done(self):
+        return self.animation.is_done()
+    
+    def update(self):
+        return self.animation.update(self.starttime, pygame.time.get_ticks())
+    
+    def reset(self):
+        self.animation.reset()
+        self.starttime = pygame.time.get_ticks()
+
+    
+    
+@dataclass
+class AnimStackElement:
+    parent: AnimationStack
+    
+    def _general_getter(self, i):
+        return self.parent(id(self))[i]
+    def _general_setter(self, val, i):
+        self.parent[id(self)][i] = val
+    
+    @property
+    def animation(self): return self._general_getter(0)
+    @animation.setter
+    def animation(self, val): self._general_setter(val, 0)
+    
+    @property
+    def mask(self): return self._general_getter(1)
+    @mask.setter
+    def mask(self, val): self._general_setter(val, 1)
+    
+    def remove(self):
+        del self.parent[id(self)]
         
-        return AnimationFrame(
-            self.sprite,
-            "absolute",
-            newpos
-        )
+
+class AnimationStack(_AnimationPlayer):
+    def __init__(self):
+        super().__init__()
+        self.tokendict: dict[int, tuple[Animation, list[bool]], bool] = {}
+    
+    def add_stack(self, animation: Animation, mask: list[bool]) -> AnimStackElement:
+        token = AnimStackElement(self)
+        self.tokendict[id(token)] = [animation, mask, False]
+        return token
+    
+    
+    def fallback(self):
+        return [_AnimationCtxFrame for _ in range(len(self.tokendict))]
+    
+    def is_done(self):
+        return all([token[0].is_done() for token in self.tokendict.values()])
+    
+    def reset(self):
+        for token in self.tokendict.values():
+            token[0].reset()
+        self.starttime = pygame.time.get_ticks()
+        
+    def update(self, origin: tuple[int, int]):
+        position = [origin for _ in range(len(list(self.tokendict.values())[0][1]))]
+        
+        for key, (anim, mask) in self.tokendict.items():
+            if not mask:
+                continue
+            
+            if anim.is_done():
+                self.tokendict[key][1] = False
+                continue
+            
+            for i in range(len(mask)):
+                ctx = mask[i]

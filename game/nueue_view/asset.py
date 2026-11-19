@@ -1,18 +1,21 @@
 import pygame
 
-from typing import Callable
+from typing import Callable, ClassVar
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
 class _PrimitiveRenderer(ABC):
     @abstractmethod
     def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]): ...
-    
+    @abstractmethod
+    def get(self) -> pygame.Surface: ...
 
 class SurfacesContainer(_PrimitiveRenderer):
     def __init__(
         self,
         surfaces: list[pygame.Surface],
-        filters: list[Callable[[pygame.Surface], None]],
+        rect: pygame.Rect,
+        filters: list[Callable[[pygame.Surface], None]] = [],
         filter_enabled: bool = False
     ):
         self._surfaces = surfaces
@@ -21,6 +24,7 @@ class SurfacesContainer(_PrimitiveRenderer):
         self._cachestats = {}
         self._cached_surf: pygame.Surface = None
         self._filter_enabled = filter_enabled
+        self._rect = rect
     
     def _setattr(self, attrname: str, value):
         setattr(self, attrname, value)
@@ -35,6 +39,11 @@ class SurfacesContainer(_PrimitiveRenderer):
     @property
     def variants_count(self) -> int:
         return len(self.surfaces)
+    
+    @property
+    def rect(self): return self._rect
+    @rect.setter
+    def rect(self, val): self._setattr("_rect", val)
     
     @property
     def surfaces(self): return self._surfaces
@@ -78,3 +87,25 @@ class SurfacesContainer(_PrimitiveRenderer):
     
     def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]):
         parent_surface.blit(self.get(), origin)
+
+
+@dataclass
+class FilterArray:
+    surfaces: list[SurfacesContainer]
+    mask: list[bool]
+    active_filters: list[Callable[[pygame.Surface], None]]
+    inactive_filters: list[Callable[[pygame.Surface], None]]
+    _applied: ClassVar[list[bool]]
+    
+    def update(self):
+        for i, (surf, applied, mask) in enumerate(zip(self.surfaces, self._applied, self.mask)):
+            if mask == applied: continue # prevents unnecessary recache
+            self._applied[i] = mask
+            surf.filters = self.active_filters if mask else self.inactive_filters
+    
+    def purge_cache(self):
+        for surf in self.surfaces:
+            surf.purge_cache()    
+    
+    def get(self) -> list[pygame.Surface]:
+        return [surf.get() for surf in self.surfaces]
