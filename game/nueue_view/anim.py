@@ -147,7 +147,6 @@ class GeneralAnimationPlayer(_AnimationPlayer):
         self.starttime = pygame.time.get_ticks()
 
     
-    
 @dataclass
 class AnimStackElement:
     parent: AnimationStack

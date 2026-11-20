@@ -4,15 +4,10 @@ from abc import ABC, abstractmethod
 
 import anim
 import asset
-
-@dataclass
-class LayoutItemAnimation:
-    animation: anim.Animation
-    mask: list[bool]
     
 
 @dataclass
-class Layout(ABC, asset._PrimitiveRenderer):
+class Layout(ABC):
     items: ClassVar[list[asset.SurfacesContainer]] = Field(default_factory=list)
     animations: anim.AnimationStack
     
