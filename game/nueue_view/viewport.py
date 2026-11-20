@@ -1,0 +1,39 @@
+import pygame
+from dataclasses import dataclass, field
+
+@dataclass
+class Viewport:
+    logical_size: tuple[int, int]
+    window_size: tuple[int, int]
+    scale: float = field(init=False, default=1.0)
+    offset: tuple[int, int] = field(init=False, default=(0, 0))
+    
+    def __post_Init__(self):
+        self.resize(self.window_size)
+        
+    def resize(self, window_size: tuple[int, int]):
+        self.window_size = window_size
+        lw, lh = self.logical_size
+        ww, wh = window_size
+        self.scale = min(ww / lw, wh / lh)
+        self.offset = ((ww - int(lw * self.scale))) // 2, (wh - int(lh * self.scale) // 2)
+    
+    def window_to_logical(self, pos) -> tuple[int, int]:
+        return (
+            int((pos[0] - self.offset[0]) / self.scale),
+            int((pos[1] - self.offset[1]) / self.scale),
+        )
+    
+    def logical_to_window(self, pos) -> tuple[int, int]:
+        return (
+            int(pos[0] * self.scale + self.offset[0]),
+            int(pos[1] * self.scale + self.offset[1]),
+        )
+        
+    def windows_to_logical(self, poses: list[tuple[int, int]]): return [self.window_to_logical(p) for p in poses]
+    def logicals_to_window(self, poses: list[tuple[int, int]]): return [self.logical_to_window(p) for p in poses]
+    
+    def scale(self, surface: pygame.Surface) -> pygame.Surface:
+        size = (int(self.logical_size[0] * self.scale), int(self.logical_size[1] * self.scale))
+        scaled = surface if size == surface.get_size() else pygame.transform.scale(surface, size)
+        return scaled
