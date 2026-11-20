@@ -11,11 +11,11 @@ class SurfacesContainer(_base.PrimitiveRenderer):
         self,
         surfaces: list[pygame.Surface],
         rect: pygame.Rect,
-        filters: list[Callable[[pygame.Surface], None]] = [],
+        filters: list[Callable[[pygame.Surface], None]] = None,
         filter_enabled: bool = False
     ):
         self._surfaces = surfaces
-        self._filters = filters
+        self._filters = filters or []
         self._variant: int = 0
         self._cachestats = {}
         self._cached_surf: pygame.Surface = None
@@ -57,7 +57,7 @@ class SurfacesContainer(_base.PrimitiveRenderer):
     def variant(self, val): self._setattr("_variant", val)
     
     @property
-    def filter_enabled(self): return self._variant
+    def filter_enabled(self): return self._filter_enabled
     @filter_enabled.setter
     def filter_enabled(self, val): self._setattr("_filter_enabled", val)
     
@@ -92,6 +92,9 @@ class FilterArray:
     active_filters: list[Callable[[pygame.Surface], None]]
     inactive_filters: list[Callable[[pygame.Surface], None]]
     _applied: list[bool] = field(init=False)
+    
+    def __post_init__(self):
+        self._applied = [False] * len(self.surfaces)
     
     def update(self):
         for i, (surf, applied, mask) in enumerate(zip(self.surfaces, self._applied, self.mask)):

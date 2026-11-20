@@ -4,12 +4,12 @@ from abc import ABC, abstractmethod
 class RefObject(ABC):
     @property
     @abstractmethod
-    def parent(self): ...
+    def source(self): ...
     
-    def _general_getter(self, i):
-        return self.parent(id(self))[i]
-    def _general_setter(self, val, i):
-        self.parent[id(self)][i] = val
+    def _general_getter(self, attr):
+        return getattr(self.source(id(self)), attr)
+    def _general_setter(self, attr, val):
+        setattr(id(self), attr, val)
         
 
 class PrimitiveRenderer(ABC):

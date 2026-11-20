@@ -6,7 +6,12 @@ from abc import ABC, abstractmethod
 
 from .import anim
 from .import asset
-    
+
+
+@dataclass
+class _LayoutReturn:
+    surface: pygame.Surface
+    position: tuple[int, int]
 
 @dataclass
 class Layout(ABC):
@@ -26,20 +31,20 @@ class Layout(ABC):
     def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     
     
-    def __call__(self, origin: tuple[int, int], update: bool = False) -> list[tuple[pygame.Surface, tuple[int, int]]]:
-        poses = [(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
+    def __call__(self, origin: tuple[int, int], update: bool = False) -> list[_LayoutReturn]:
+        poses = [tuple(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
         method = self.animations.update if update else self.animations.get
         ctxs = method(origin=origin)
         
         for idx, (pos, ctxframe) in enumerate(zip(poses, ctxs)):
-            poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else (pos[i] + ctxframe.position[i] for i in range(2))
-        return zip((surf.get() for surf in self.items), poses)
+            poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else tuple(pos[i] + ctxframe.position[i] for i in range(2))
+        return [_LayoutReturn(self.items[i].get(), pos) for i, pos in enumerate(poses)]
     
     
     def append(self, surfcont: asset.SurfacesContainer):
         self.items.append(surfcont)
         
-        if len(self.items) >= self.items_limit and self.items_limit > 0:
+        if len(self.items) > self.items_limit and self.items_limit > 0:
             self.cut()
 
 
@@ -58,7 +63,7 @@ class UniformGridLayout(Layout):
     
     @property
     def _pos_map(self) -> list[tuple, tuple]:
-        return [(x, y) for x in range(self.rows) for y in range(self.columns)]
+        return [(x, y) for y in range(self.rows) for x in range(self.columns)]
     
     
     def positions(self):
