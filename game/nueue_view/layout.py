@@ -9,6 +9,7 @@ import asset
 class LayoutItemAnimation:
     animation: anim.Animation
     mask: list[bool]
+    
 
 @dataclass
 class Layout(ABC, asset._PrimitiveRenderer):
@@ -25,22 +26,17 @@ class Layout(ABC, asset._PrimitiveRenderer):
     
     
     @abstractmethod
-    def positions(self) -> list[tuple[int, int]]: ...
+    def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     
-    def update_anims(self):
-        for anim in self.animations:
-            anim.animation.update()
     
     def __call__(self, origin: tuple[int, int], update: bool = False) -> list[tuple[int, int]]:
+        poses = [(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
+        method = self.animations.update if update else self.animations.get
+        ctxs = method(origin=origin)
         
-        poses = self.positions()
-        offsets = list[tuple[Literal["relative", "absolute"], tuple[int, int]]] = []
-
-        if update:
-            self.update_anims()
-        
-        for item in self.animations:
-            if not item.mask
+        for idx, (pos, ctxframe) in enumerate(zip(poses, ctxs)):
+            poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else (pos[i] + ctxframe.position[i] for i in range(2))
+        return poses
     
     
     def append(self, surfcont: asset.SurfacesContainer):
@@ -61,6 +57,7 @@ class UniformGridLayout(Layout):
     @property
     def items_limit(self):
         return self.rows * self.columns
+    
     
     @property
     def _pos_map(self) -> list[tuple, tuple]:

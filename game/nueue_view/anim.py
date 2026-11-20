@@ -14,7 +14,7 @@ import game.nueue_view.asset as asset
 class _AnimationCtxFrame:
     postype: Literal["absolute", "relative"] = "relative"
     position: tuple[int, int] = (0, 0)
-    variant: int = 0
+    variant: int = -1 # -1 means don't change
     
 class Animation(ABC):
     @property
@@ -97,7 +97,7 @@ class _AnimationPlayer(ABC):
         self.starttime = 0
         self.playing = False
     
-    def start(self, time: float|None):
+    def play(self, time: float|None):
         self.starttime = time or pygame.time.get_ticks()
         self.playing = True
     
@@ -167,6 +167,13 @@ class AnimStackElement:
     @mask.setter
     def mask(self, val): self._general_setter(val, 1)
     
+    def play(self):
+        self._general_setter(True, 2)
+        self._general_setter(pygame.time.get_ticks())
+    
+    def stop(self):
+        self._general_setter(False, 2)
+    
     def remove(self):
         del self.parent[id(self)]
         
@@ -178,7 +185,7 @@ class AnimationStack(_AnimationPlayer):
     
     def add_stack(self, animation: Animation, mask: list[bool]) -> AnimStackElement:
         token = AnimStackElement(self)
-        self.tokendict[id(token)] = [animation, mask, False]
+        self.tokendict[id(token)] = [animation, mask, False, 0] # anim, mask, playing, starttime
         return token
     
     
@@ -193,16 +200,41 @@ class AnimationStack(_AnimationPlayer):
             token[0].reset()
         self.starttime = pygame.time.get_ticks()
         
-    def update(self, origin: tuple[int, int]):
-        position = [origin for _ in range(len(list(self.tokendict.values())[0][1]))]
+    def update(self, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
+        length = len(list(self.tokendict.values())[0][1])
+        ctxs = [_AnimationCtxFrame(postype=postype) for _ in range(length)]
         
-        for key, (anim, mask) in self.tokendict.items():
-            if not mask:
+        for key, (anim, mask, playing, starttime) in self.tokendict.items():
+            if not playing:
                 continue
             
             if anim.is_done():
-                self.tokendict[key][1] = False
+                self.tokendict[key][2] = False
                 continue
             
-            for i in range(len(mask)):
-                ctx = mask[i]
+            for i, m in enumerate(mask):
+                if not m:
+                    continue
+                
+                ctxframe = anim.update(starttime, pygame.time.get_ticks())
+                ctxs[i].variant = ctxframe.variant
+                ctxs[i].position = ctxframe.position if ctxframe.postype == "absolute" else (
+                    ctxframe.position[0] + origin[0],
+                    ctxframe.position[1] + origin[1]
+                )
+        return ctxs
+    
+    def get(self, origin: tuple[int, int]):
+        ctxs = []
+        
+        for anim, mask, playing, starttime in self.tokendict.values():
+            if not playing:
+                continue
+            
+            for m in mask:
+                if not m:
+                    continue
+                
+                ctxframe = anim.update(starttime, pygame.time.get_ticks())
+                ctxs.append(ctxframe)
+        return ctxs
