@@ -224,7 +224,7 @@ class AnimationStack(_AnimationPlayer):
                 )
         return ctxs
     
-    def get(self, origin: tuple[int, int]):
+    def get(self, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
         ctxs = []
         
         for anim, mask, playing, starttime in self.tokendict.values():
@@ -236,5 +236,9 @@ class AnimationStack(_AnimationPlayer):
                     continue
                 
                 ctxframe = anim.update(starttime, pygame.time.get_ticks())
-                ctxs.append(ctxframe)
+                ctxs.append(_AnimationCtxFrame(
+                    postype,
+                    ctxframe.position if ctxframe.postype == "absolute" else (ctxframe.position[i] + origin[i] for i in range(2)),
+                    ctxframe.variant
+                ))
         return ctxs
