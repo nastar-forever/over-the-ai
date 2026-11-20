@@ -1,16 +1,12 @@
 import pygame
 
-from typing import Callable, ClassVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+from typing import Callable
 
-class _PrimitiveRenderer(ABC):
-    @abstractmethod
-    def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]): ...
-    @abstractmethod
-    def get(self) -> pygame.Surface: ...
+from . import _base
 
-class SurfacesContainer(_PrimitiveRenderer):
+class SurfacesContainer(_base.PrimitiveRenderer):
     def __init__(
         self,
         surfaces: list[pygame.Surface],
@@ -95,7 +91,7 @@ class FilterArray:
     mask: list[bool]
     active_filters: list[Callable[[pygame.Surface], None]]
     inactive_filters: list[Callable[[pygame.Surface], None]]
-    _applied: ClassVar[list[bool]]
+    _applied: list[bool] = field(init=False)
     
     def update(self):
         for i, (surf, applied, mask) in enumerate(zip(self.surfaces, self._applied, self.mask)):

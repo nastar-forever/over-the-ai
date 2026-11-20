@@ -1,14 +1,16 @@
-from typing import ClassVar, Literal
-from dataclasses import dataclass, Field
+import pygame
+
+from typing import Literal
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
-import anim
-import asset
+from .import anim
+from .import asset
     
 
 @dataclass
 class Layout(ABC):
-    items: ClassVar[list[asset.SurfacesContainer]] = Field(default_factory=list)
+    items: list[asset.SurfacesContainer] = field(init=False, default_factory=list)
     animations: anim.AnimationStack
     
     @property
@@ -24,14 +26,14 @@ class Layout(ABC):
     def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     
     
-    def __call__(self, origin: tuple[int, int], update: bool = False) -> list[tuple[int, int]]:
+    def __call__(self, origin: tuple[int, int], update: bool = False) -> list[tuple[pygame.Surface, tuple[int, int]]]:
         poses = [(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
         method = self.animations.update if update else self.animations.get
         ctxs = method(origin=origin)
         
         for idx, (pos, ctxframe) in enumerate(zip(poses, ctxs)):
             poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else (pos[i] + ctxframe.position[i] for i in range(2))
-        return poses
+        return zip((surf.get() for surf in self.items), poses)
     
     
     def append(self, surfcont: asset.SurfacesContainer):
@@ -62,6 +64,6 @@ class UniformGridLayout(Layout):
     def positions(self):
         poses = []
         
-        for pos in self._pos_map, self.items:
+        for pos in self._pos_map:
             poses.append((pos[0] * self.width, pos[1] * self.height))
         return poses

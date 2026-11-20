@@ -3,11 +3,12 @@ from __future__ import annotations
 import math
 import pygame
 
-from typing import Literal, Callable, ClassVar
-from dataclasses import dataclass, Field
+from typing import Literal, Callable
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
-import game.nueue_view.asset as asset
+from . import _base
+from . import asset
 
 
 @dataclass
@@ -43,8 +44,8 @@ class LoopingAnimation(Animation):
 class SpriteAnim(LoopingAnimation):
     frame_counts: int
     frame_duration: float
-    _since_last: ClassVar[float] = 0
-    _curr_frame: ClassVar[int] = 0
+    _since_last: float = field(init=False, default=0)
+    _curr_frame: int = field(init=False, default=0)
     
     def update(self, _, curr):
         if curr - self._since_last >= self.frame_duration:
@@ -68,10 +69,10 @@ class TweenAnim(Animation):
     sprite: asset.SurfacesContainer
     duration: float
     tween_to: tuple[int, int]
-    tween_from: tuple[int, int] = Field(default=(0, 0))
-    ease_func: Callable[[float], float] = Field(default=linear)
+    tween_from: tuple[int, int] = field(default_factory=lambda: (0, 0))
+    ease_func: Callable[[float], float] = field(default=linear)
     postype: Literal["absolute", "relative"] = "relative"
-    _lerped = ClassVar[tuple[int, int]] = None
+    _lerped: tuple[int, int] = field(init=False)
     
     def __post_init__(self):
         self._lerped = self.tween_from
@@ -148,13 +149,8 @@ class GeneralAnimationPlayer(_AnimationPlayer):
 
     
 @dataclass
-class AnimStackElement:
+class _AnimStackObject(_base.RefObject):
     parent: AnimationStack
-    
-    def _general_getter(self, i):
-        return self.parent(id(self))[i]
-    def _general_setter(self, val, i):
-        self.parent[id(self)][i] = val
     
     @property
     def animation(self): return self._general_getter(0)
@@ -182,8 +178,8 @@ class AnimationStack(_AnimationPlayer):
         super().__init__()
         self.tokendict: dict[int, tuple[Animation, list[bool]], bool] = {}
     
-    def add_stack(self, animation: Animation, mask: list[bool]) -> AnimStackElement:
-        token = AnimStackElement(self)
+    def add_stack(self, animation: Animation, mask: list[bool]) -> _AnimStackObject:
+        token = _AnimStackObject(self)
         self.tokendict[id(token)] = [animation, mask, False, 0] # anim, mask, playing, starttime
         return token
     
