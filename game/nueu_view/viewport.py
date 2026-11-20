@@ -18,20 +18,20 @@ class Viewport:
         self.scale = min(ww / lw, wh / lh)
         self.offset = ((ww - int(lw * self.scale))) // 2, (wh - int(lh * self.scale)) // 2.
     
-    def window_to_logical(self, pos) -> tuple[int, int]:
+    def window_to_logical(self, vector) -> tuple[int, int]:
         return (
-            int((pos[0] - self.offset[0]) / self.scale),
-            int((pos[1] - self.offset[1]) / self.scale),
+            int((vector[0] - self.offset[0]) / self.scale),
+            int((vector[1] - self.offset[1]) / self.scale),
         )
     
-    def logical_to_window(self, pos) -> tuple[int, int]:
+    def logical_to_window(self, vector) -> tuple[int, int]:
         return (
-            int(pos[0] * self.scale + self.offset[0]),
-            int(pos[1] * self.scale + self.offset[1]),
+            int(vector[0] * self.scale + self.offset[0]),
+            int(vector[1] * self.scale + self.offset[1]),
         )
         
-    def windows_to_logical(self, poses: list[tuple[int, int]]): return [self.window_to_logical(p) for p in poses]
-    def logicals_to_window(self, poses: list[tuple[int, int]]): return [self.logical_to_window(p) for p in poses]
+    def windows_to_logical(self, vectors: list[tuple[int, int]]): return [self.window_to_logical(p) for p in vectors]
+    def logicals_to_window(self, vectors: list[tuple[int, int]]): return [self.logical_to_window(p) for p in vectors]
     
     def pgevent_pos_to_logical(self, event: pygame.event.Event):
         if hasattr(event, "pos"):

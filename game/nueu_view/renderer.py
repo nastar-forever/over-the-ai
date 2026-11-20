@@ -18,19 +18,39 @@ class SceneLayout:
 class Scene(_base.PrimitiveRenderer):
     layouts: list[SceneLayout] # pos, layout
     surface: pygame.Surface # can be a subsurface to save resources
+    size: tuple[int, int] = field(init=False)
     
-    def get(self):
+    def __post_init__(self):
+        self.update_size()
+    
+    def update_size(self):
+        grsxs: list[int] = []
+        grsys: list[int] = []
+        
+        for lay in self.layouts:
+            lreturns = lay.layout((0, 0))
+            
+            for lr in lreturns:
+                grsxs.append(lr.gr.size[0])
+                grsys.append(lr.gr.size[1])
+        self.size = (
+            max(grsxs),
+            max(grsys)
+        )
+    
+    
+    def get(self) -> _base.GetReturn:
         for sl in self.layouts:
             lay, offset = sl.layout, sl.position
             
             for lt in lay(offset):
                 self.surface.blit(lt.surf, lt.pos)
-        return self.surface
+        return _base.GetReturn(self.surface, self.size)
     
     
     def _draw(self, parent_surface, origin):
-        surf = self.get()
-        parent_surface.blit(surf, origin)
+        gr = self.get()
+        parent_surface.blit(gr.surface, gr.construct_rect(origin))
     
     
 
@@ -70,5 +90,6 @@ class Renderer:
             if not active:
                 continue
             
-            scaled = self.viewport.scale_surface(renderer.get())
-            mainwindow.blit(scaled, self.viewport.offset)
+            gr = renderer.get()
+            scaled_surf = self.viewport.scale_surface(gr.surface)
+            mainwindow.blit(scaled_surf, self.viewport.offset)

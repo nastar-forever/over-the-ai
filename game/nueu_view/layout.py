@@ -4,13 +4,14 @@ from typing import Literal
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
-from .import anim
-from .import asset
+from . import _base
+from . import anim
+from . import asset
 
 
 @dataclass
 class _LayoutReturn:
-    surface: pygame.Surface
+    gr: _base.GetReturn
     position: tuple[int, int]
 
 @dataclass
