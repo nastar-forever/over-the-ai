@@ -17,7 +17,7 @@ class _LayoutReturn:
 @dataclass
 class Layout(ABC):
     animations: anim.ArrayAnimationPlayer
-    items: list[asset.SurfacesContainer] = field(init=False, default_factory=list)
+    items: list[asset.SurfacesContainer] = field(default_factory=list)
     
     @property
     @abstractmethod
@@ -47,12 +47,22 @@ class Layout(ABC):
             out.append(_LayoutReturn(item.get(), pos))    
         return out
     
+    def drain(self) -> list[asset.SurfacesContainer]:
+        out = self.items
+        self.items = []
+        return out
+    
+    def _checklen(self):
+        if len(self.items) > self.items_limit and self.items_limit > 0:
+            self.cut()
     
     def append(self, surfcont: asset.SurfacesContainer):
         self.items.append(surfcont)
-        
-        if len(self.items) > self.items_limit and self.items_limit > 0:
-            self.cut()
+        self._checklen()
+    
+    def fill(self, surfconts: list[asset.SurfacesContainer]):
+        self.items = surfconts
+        self._checklen()
 
 
 @dataclass
