@@ -3,29 +3,30 @@ from __future__ import annotations
 import math
 import pygame
 
-from typing import Literal, Callable
 from dataclasses import dataclass, field
+from typing import Literal, Callable
 from abc import ABC, abstractmethod
+from collections import deque
 
 from . import _base
 from . import asset
 
 
 @dataclass
-class _AnimationCtxFrame:
+class AnimationFrameContext:
     postype: Literal["absolute", "relative"] = "relative"
     position: tuple[int, int] = (0, 0)
     variant: int = -1 # -1 means don't change
-    
+
 class Animation(ABC):
     @property
     def would_loop(self) -> bool:
         return False
     
     @abstractmethod
-    def update(self, start: float, curr: float) -> _AnimationCtxFrame: ...
+    def update(self, delta: float) -> AnimationFrameContext: ...
     @abstractmethod
-    def get(self) -> _AnimationCtxFrame: ...
+    def get(self) -> AnimationFrameContext: ...
     @abstractmethod
     def is_done(self) -> bool: ...
     @abstractmethod
@@ -44,26 +45,24 @@ class LoopingAnimation(Animation):
 class SpriteAnim(LoopingAnimation):
     frame_counts: int
     frame_duration: float # float
-    _since_last: float = field(init=False, default=0)
+    _elapsed: float = field(init=False, default=0)
     _curr_frame: int = field(init=False, default=0)
     
-    def update(self, _, curr):
-        if self._since_last <= 0: # Prevents first-update bug
-            self._since_last = curr
-            return _AnimationCtxFrame(variant=self._curr_frame)
-        
-        if curr - self._since_last >= self.frame_duration:
+    def update(self, delta):
+        self._elapsed += delta
+        while self._elapsed >= self.frame_duration:
+            self._elapsed -= self.frame_duration
             self._curr_frame = (self._curr_frame + 1) % self.frame_counts
             
-        self._since_last = curr
-        return _AnimationCtxFrame(variant=self._curr_frame)
+        return AnimationFrameContext(variant=self._curr_frame)
+
     
     def get(self):
-        return _AnimationCtxFrame(variant=self._curr_frame)
+        return AnimationFrameContext(variant=self._curr_frame)
     
     def reset(self):
         self._curr_frame = 0
-        self._since_last = 0    
+        self._elapsed = 0
     
 
 linear = lambda t: t
@@ -77,27 +76,63 @@ class TweenAnim(Animation):
     ease_func: Callable[[float], float] = field(default=linear)
     postype: Literal["absolute", "relative"] = "relative"
     _lerped: tuple[int, int] = field(init=False)
+    _elapsed: float = field(init=False, default=0)
     
     def __post_init__(self):
-        self._lerped = self.tween_from
+        self._elapsed >= self.duration
     
     def is_done(self):
         return self._lerped == self.tween_to
     
     def update(self, start, curr):
-        t = min((curr - start) / self.duration, 1)
+        t = min(self._elapsed / self.duration, 1)
         self._lerped = tuple(self.tween_from[i] + (self.tween_to[i] - self.tween_from[i]) * self.ease_func(t) for i in range(2))
         
-        return _AnimationCtxFrame(
+        return AnimationFrameContext(
             self.postype,
             self._lerped
         )
     
     def get(self):
-        return _AnimationCtxFrame(self.postype, self._lerped)
+        return AnimationFrameContext(self.postype, self._lerped)
     
     def reset(self):
         self._lerped = self.tween_from
+        self._elapsed = 0
+
+
+class AnimationQueue:
+    def __init__(self, *anims: Animation):
+        self.anims: deque[Animation] = deque(anims)
+    
+    def push(self, anim: Animation):
+        self.anims.append(anim)
+    
+    def skip(self):
+        self.anims.popleft()
+    
+    def update(self, delta):
+        self.anims[0].update(delta)
+        if self.anims[0].is_done():
+            self.anims.popleft()
+    
+    def is_done(self):
+        return not self.anims
+
+class AnimationParallel:
+    def __init__(self, *anims: Animation):
+        self.anims: list[Animation] = list(anims)
+    
+    def skip(self):
+        self.anims.clear()
+    
+    def update(self, delta):
+        for anim in self.anims:
+            if not anim.is_done():
+                anim.update(delta)
+    
+    def is_done(self):
+        return all(anim.is_done() for anim in self.anims)
 
 
 class _AnimationPlayer(ABC):
@@ -110,10 +145,10 @@ class _AnimationPlayer(ABC):
         self.playing = True
     
     @staticmethod
-    def fallback() -> _AnimationCtxFrame: return _AnimationCtxFrame()
+    def fallback() -> AnimationFrameContext: return AnimationFrameContext()
     def is_done(self) -> bool: ...
     
-    def update(self) -> _AnimationCtxFrame: ...
+    def update(self, delta: float) -> AnimationFrameContext: ...
     
     def __call__(self, *args, **kwargs):
         if self.is_done():
@@ -128,7 +163,7 @@ class _AnimationPlayer(ABC):
     
 
     @abstractmethod
-    def get(self) -> _AnimationCtxFrame: ...
+    def get(self) -> AnimationFrameContext: ...
     
     @abstractmethod
     def reset(self): ...
@@ -147,8 +182,8 @@ class GeneralAnimationPlayer(_AnimationPlayer):
     def is_done(self):
         return self.animation.is_done()
     
-    def update(self):
-        return self.animation.update(self.starttime, pygame.time.get_ticks())
+    def update(self, delta):
+        return self.animation.update(delta)
     
     def get(self):
         return self.animation.get()
@@ -156,10 +191,16 @@ class GeneralAnimationPlayer(_AnimationPlayer):
     def reset(self):
         self.animation.reset()
         self.starttime = pygame.time.get_ticks()
-
     
-class _AnimStackObject(_base.RefObject):
-    def __init__(self, parent: AnimationStack):
+@dataclass
+class _ArrayAnimationPlayerElement:
+    animation: Animation
+    mask: list[bool]
+    active: bool
+    starttime: int
+    
+class _ArrayAnimationPlayerObject(_base.RefObject):
+    def __init__(self, parent: ArrayAnimationPlayer):
         self.parent = parent
         self.source = parent.tokendict
     
@@ -183,28 +224,20 @@ class _AnimStackObject(_base.RefObject):
     
     def remove(self):
         del self.source[id(self)]
-        
 
-@dataclass
-class _AnimationStackElement:
-    animation: Animation
-    mask: list[bool]
-    active: bool
-    starttime: int
-
-class AnimationStack(_AnimationPlayer):
+class ArrayAnimationPlayer(_AnimationPlayer):
     def __init__(self):
         super().__init__()
-        self.tokendict: dict[int, _AnimationStackElement] = {}
+        self.tokendict: dict[int, _ArrayAnimationPlayerElement] = {}
     
-    def add_stack(self, animation: Animation, mask: list[bool]) -> _AnimStackObject:
-        token = _AnimStackObject(self)
-        self.tokendict[id(token)] = _AnimationStackElement(animation, mask, False, 0)
+    def add_animation(self, animation: Animation, mask: list[bool]) -> _ArrayAnimationPlayerObject:
+        token = _ArrayAnimationPlayerObject(self)
+        self.tokendict[id(token)] = _ArrayAnimationPlayerElement(animation, mask, False, 0)
         return token
     
     
     def fallback(self):
-        return [_AnimationCtxFrame() for _ in range(len(self.tokendict))]
+        return [AnimationFrameContext() for _ in range(len(self.tokendict))]
     
     def is_done(self):
         return all([token.animation.is_done() for token in self.tokendict.values()])
@@ -214,12 +247,12 @@ class AnimationStack(_AnimationPlayer):
             token.animation.reset()
         self.starttime = pygame.time.get_ticks()
         
-    def update(self, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
+    def update(self, delta, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
         if not self.tokendict:
             return []
         
         length = len(list(self.tokendict.values())[0][1])
-        ctxs = [_AnimationCtxFrame(postype=postype) for _ in range(length)]
+        ctxs = [AnimationFrameContext(postype=postype) for _ in range(length)]
         
         for key, (anim, mask, playing, starttime) in self.tokendict.items():
             if not playing:
@@ -229,7 +262,7 @@ class AnimationStack(_AnimationPlayer):
                 self.tokendict[key].active = False
                 continue
             
-            ctxframe = anim.update(starttime, pygame.time.get_ticks())
+            ctxframe = anim.update(delta)
             
             for i, m in enumerate(mask):
                 if not m:
@@ -253,8 +286,8 @@ class AnimationStack(_AnimationPlayer):
                 if not m:
                     continue
                 
-                ctxframe = element.animation.get(element.starttime, pygame.time.get_ticks())
-                ctxs.append(_AnimationCtxFrame(
+                ctxframe = element.animation.get()
+                ctxs.append(AnimationFrameContext(
                     postype,
                     ctxframe.position if ctxframe.postype == "absolute" else tuple(ctxframe.position[i] + origin[i] for i in range(2)),
                     ctxframe.variant

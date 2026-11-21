@@ -17,7 +17,7 @@ class _LayoutReturn:
 @dataclass
 class Layout(ABC):
     items: list[asset.SurfacesContainer] = field(init=False, default_factory=list)
-    animations: anim.AnimationStack
+    animations: anim.ArrayAnimationPlayer
     
     @property
     @abstractmethod
@@ -32,10 +32,15 @@ class Layout(ABC):
     def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     
     
-    def __call__(self, origin: tuple[int, int], update: bool = False) -> list[_LayoutReturn]:
+    def __call__(
+        self,
+        origin: tuple[int, int],
+        update: bool = False,
+        delta: float = None
+    ) -> list[_LayoutReturn]:
+        
         poses = [tuple(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
-        method = self.animations.update if update else self.animations.get
-        ctxs = method(origin=origin)
+        ctxs = self.animations.update(delta) if update else self.animations.get()
         
         for idx, (pos, ctxframe) in enumerate(zip(poses, ctxs)):
             poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else tuple(pos[i] + ctxframe.position[i] for i in range(2))

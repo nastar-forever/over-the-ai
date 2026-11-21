@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from . import _base
 from . import layout
-from . import asset
+from . import anim
 from . import viewport
 
 
@@ -83,7 +83,10 @@ class Renderer:
         )
         return token
     
-    def render(self, mainwindow: pygame.Surface):
+    def update(self, delta: float) -> anim.AnimationFrameContext:
+        return [element.renderer.update(delta) for element in self.scenes.values() if element.active]
+    
+    def render(self, mainwindow: pygame.Surface) -> None:
         for element in self.scenes.values():
             active, renderer = element.active, element.renderer
             
