@@ -2,32 +2,43 @@ from __future__ import annotations
 
 import math
 import pygame
+import operator
 
 from dataclasses import dataclass, field
-from typing import Literal, Callable
+from typing import Literal, Callable, Generic, TypeVar
 from abc import ABC, abstractmethod
 from collections import deque
 
 from . import _base
 from . import asset
 
+T = TypeVar("T")
+
+@dataclass
+class ContextValue(Generic[T]):
+    value: T
+    type: Literal["absolute", "relative"] = "relative"
+    
+    def merge(self, new: "ContextValue[T]", combine: Callable[[T, T], T]) -> None:
+        if new.type == "absolute":
+            self.value, self.type = new.value, "absolute"
+        else:
+            self.value = combine(self.value, new.value)
 
 @dataclass
 class AnimationFrameContext:
-    postype: Literal["absolute", "relative"] = "relative"
-    position: tuple[int, int] = (0, 0)
-    variant: int = -1 # -1 means don't change
+    position: ContextValue[tuple[int, int]] = field(default_factory=lambda: ContextValue((0, 0)))
+    rotation: ContextValue[float] = field(default_factory=lambda: ContextValue(0.0, "absolute"))
+    scale: ContextValue[float] = field(default_factory=lambda: ContextValue(1.0, "absolute"))
+    variant: int = -1 # -1 means unchanged
+    
 
 def _merge(base: AnimationFrameContext, new: AnimationFrameContext):
     if new.variant != -1:
         base.variant = new.variant
-    if new.postype == "absolute":
-        base.postype, base.position = "absolute", new.position
-    else:
-        base.position = tuple(
-            base.position[i] + new.position[i]
-            for i in range(2)
-        )
+    base.position.merge(new.position, _base.add2)
+    base.rotation.merge(new.position, operator.add)
+    base.rotation.merge(new.position, operator.mul)
 
 class Animation(ABC):
     @property
@@ -84,10 +95,10 @@ linear = lambda t: t
 ease_out = lambda t: 1 - (1 - t) ** 3
 
 @dataclass
-class TweenAnim(Animation):
+class PositionTweenAnim(Animation):
     duration: float # ms
+    tween_from: tuple[int, int]
     tween_to: tuple[int, int]
-    tween_from: tuple[int, int] = field(default_factory=lambda: (0, 0))
     ease_func: Callable[[float], float] = field(default=linear)
     postype: Literal["absolute", "relative"] = "relative"
     _lerped: tuple[int, int] = field(init=False)
@@ -107,15 +118,41 @@ class TweenAnim(Animation):
     
     def get(self):
         return AnimationFrameContext(
-            self.postype,
-            self._pos()
+            position=ContextValue(self._pos(), self.postype)
         )
     
+    def is_done(self):
+        return self._elapsed >= self.duration
+    
+    def reset(self):
+        self._elapsed = 0
+
+
+@dataclass
+class TranformTweenAnim(Animation):
+    duration: float
+    rot_from: float = 0.0
+    rot_to: float = 0.0
+    scale_from: float = 0.0
+    scale_to: float = 0.0
+    
+    ease_func: Callable[[float], float] = linear
+    
+    rot_type: Literal["absolute", "relative"] = "absolute"
+    scale_type: Literal["absolute", "relative"] = "absolute"
+    _elapsed: float = field(init=False, default=0)
+    
     def get(self):
+        t = 1.0 if self.duration <= 0 else min(self._elapsed / self.duration, 1.0)
+        e = self.ease_func(t)
         return AnimationFrameContext(
-            self.postype,
-            self._pos()
+            rotation=ContextValue(self.rot_from + (self.rot_to - self.rot_from) * e, self.rot_type),
+            scale=ContextValue(self.scale_from + (self.scale_to - self.scale_from) * e, self.scale_type)
         )
+    
+    def update(self, delta):
+        self._elapsed += delta
+        return self.get()
     
     def is_done(self):
         return self._elapsed >= self.duration

@@ -3,6 +3,8 @@ import pygame
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
+add2 = lambda a, b: tuple(a[i] + b[i] for i in range(2))
+
 @dataclass
 class GetReturn:
     surface: pygame.Surface
