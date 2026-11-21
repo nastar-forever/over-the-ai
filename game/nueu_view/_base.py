@@ -11,17 +11,18 @@ class GetReturn:
     def construct_rect(self, origin: tuple[int, int]):
         return pygame.Rect(origin[0], origin[1], self.size[0], self.size[1])
 
-class RefObject(ABC):
-    @property
-    @abstractmethod
-    def source(self): ...
-    
+class RefObject:
+    def __init__(self, parent, source: dict, key: int):
+        self.parent, self.source, self.key = parent, source, key
+
     def _general_getter(self, attr):
-        return getattr(self.source(id(self)), attr)
+        return getattr(self.source(self.key), attr)
     def _general_setter(self, attr, val):
-        setattr(id(self), attr, val)
+        setattr(self.key, attr, val)
 
 class PrimitiveRenderer(ABC):
+    def update(self, delta: float) -> None: ... # Optional
+    
     @abstractmethod
     def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]): ...
     @abstractmethod

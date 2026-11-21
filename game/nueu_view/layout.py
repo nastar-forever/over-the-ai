@@ -16,15 +16,15 @@ class _LayoutReturn:
 
 @dataclass
 class Layout(ABC):
-    items: list[asset.SurfacesContainer] = field(init=False, default_factory=list)
     animations: anim.ArrayAnimationPlayer
+    items: list[asset.SurfacesContainer] = field(init=False, default_factory=list)
     
     @property
     @abstractmethod
     def items_limit(self) -> int: ... # -1 or 0 for no limit
     
     
-    def cut(self) -> None:
+    def cut(self) -> None: # user can define it's own cut behavior
         raise IndexError(f"{len(self.items)} items is beyond the limit ({self.items_limit})")
     
     
@@ -32,19 +32,20 @@ class Layout(ABC):
     def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     
     
-    def __call__(
-        self,
-        origin: tuple[int, int],
-        update: bool = False,
-        delta: float = None
-    ) -> list[_LayoutReturn]:
+    def __call__(self, origin, delta: float | None = None) -> list[_LayoutReturn]:
+        ctxs = self.animations.get_for(len(self.items), delta)
+        out = []
         
-        poses = [tuple(pos[i] + origin[i] for i in range(2)) for pos in self.positions()]
-        ctxs = self.animations.update(delta) if update else self.animations.get()
+        for item, base, ctx in zip(self.items, self.positions(), ctxs):
+            if ctx.variant != -1:
+                item.variant = ctx.variant
         
-        for idx, (pos, ctxframe) in enumerate(zip(poses, ctxs)):
-            poses[idx] = ctxframe.position if ctxframe.postype == "absolute" else tuple(pos[i] + ctxframe.position[i] for i in range(2))
-        return [_LayoutReturn(self.items[i].get(), pos) for i, pos in enumerate(poses)]
+            if ctx.postype == "absolute":
+                pos = ctx.position
+            else:
+                pos = (origin[0] + base[0] + ctx.position[0], origin[1] + base[1] + ctx.position[1])
+            out.append(_LayoutReturn(item.get(), pos))    
+        return out
     
     
     def append(self, surfcont: asset.SurfacesContainer):

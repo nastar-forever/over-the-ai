@@ -17,82 +17,79 @@ class SceneLayout:
 @dataclass
 class Scene(_base.PrimitiveRenderer):
     layouts: list[SceneLayout] # pos, layout
-    surface: pygame.Surface # can be a subsurface to save resources
-    size: tuple[int, int] = field(init=False)
+    surface: pygame.Surface # can be a subsurface to save resources (or normal surface, wtvr the user wants)
+    clear_color: tuple[int, ...]|None = None
     
     def __post_init__(self):
-        self.update_size()
-    
-    def update_size(self):
-        grsxs: list[int] = []
-        grsys: list[int] = []
+        self.refresh()
         
-        for lay in self.layouts:
-            lreturns = lay.layout((0, 0))
-            
-            for lr in lreturns:
-                grsxs.append(lr.gr.size[0])
-                grsys.append(lr.gr.size[1])
-        self.size = (
-            max(grsxs),
-            max(grsys)
-        )
+    def refresh(self):
+        self._compose(None)
     
+    def _compose(self, delta: float|None):
+        if self.clear_color is not None:
+            self.surface.fill(self.clear_color)
+            
+        for sl in self.layouts:
+            for lr in sl.layout(sl.position, delta):
+                self.surface.blit(lr.gr.surface, lr.position)
     
     def get(self) -> _base.GetReturn:
-        for sl in self.layouts:
-            lay, offset = sl.layout, sl.position
-            
-            for lt in lay(offset):
-                self.surface.blit(lt.surf, lt.pos)
-        return _base.GetReturn(self.surface, self.size)
+        return _base.GetReturn(self.surface, self.surface.get_size())
     
-    
-    def _draw(self, parent_surface, origin):
+    def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]):
         gr = self.get()
         parent_surface.blit(gr.surface, gr.construct_rect(origin))
     
-    
 
-@dataclass
 class _RendererSceneObject(_base.RefObject):
-    def __init__(self, parent: Renderer):
-        self.parent = parent
-        self.source = parent.scenes
-    
-    @property
-    def active(self): return self._general_getter("active")
-    @active.setter
-    def active(self, val): self._general_setter("active", val)
+    active = property(
+        lambda self: self._general_getter("active"),
+        lambda self, val: self._general_setter("active", val)
+    )
+    origin = property(
+        lambda self: self._general_getter("origin"),
+        lambda self, val: self._general_setter("origin", val)
+    )
+
 
 @dataclass
 class _RendererSceneElement:
     renderer: _base.PrimitiveRenderer
+    origin: tuple[int, int] = (0, 0)
     active: bool = False
 
 @dataclass
 class Renderer:
     viewport: viewport.Viewport
-    scenes: dict[int, _RendererSceneElement] = field(init=False, default_factory=[]) # active, renderer
+    bg: tuple[int, int, int] = (0, 0, 0)
+    scenes: dict[int, _RendererSceneElement] = field(init=False, default_factory=dict) # active, renderer
+    _next_k: int = field(init=False, default=0)
+    _surface: pygame.Surface = field(init=False)
     
-    def add_scene(self, renderer: _base.PrimitiveRenderer, active: bool = False) -> _RendererSceneObject:
-        token = _RendererSceneObject(self)
-        self.scenes[id(token)] = _RendererSceneElement(
-            renderer,
-            active
-        )
-        return token
+    def __post_init__(self):
+        self._surface = pygame.Surface(self.viewport.logical_size)
     
-    def update(self, delta: float) -> anim.AnimationFrameContext:
-        return [element.renderer.update(delta) for element in self.scenes.values() if element.active]
+    def add_scene(
+        self,
+        renderer: _base.PrimitiveRenderer,
+        origin: tuple[int, int],
+        active: bool = False
+    ) -> _RendererSceneObject:
+        key, self._next_k = self._next_k, self._next_k + 1
+        self.scenes[key] = _RendererSceneElement(renderer, origin, active)
+        return _RendererSceneObject(self, self.scenes, key)
     
-    def render(self, mainwindow: pygame.Surface) -> None:
-        for element in self.scenes.values():
-            active, renderer = element.active, element.renderer
-            
-            if not active:
-                continue
-            
-            gr = renderer.get()
-            scaled_surf = self.viewport.scale_surface(gr.surface)
-            mainwindow.blit(scaled_surf, self.viewport.offset)
+    def update(self, delta: float) -> None:
+        for scene in self.scenes.values():
+            if not scene.active: continue
+            scene.renderer.update(delta)
+    
+    def render(self, window: pygame.Surface) -> None:
+        self._surface.fill(self.bg)
+        
+        for scene in self.scenes.values():
+            if not scene.active: continue
+            scene.renderer._draw(self._surface, scene.origin)
+        window.fill(self.bg)
+        window.blit(self.viewport.scale_surface(self._surface), self.viewport.offset)

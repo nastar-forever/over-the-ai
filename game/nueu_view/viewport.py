@@ -15,8 +15,8 @@ class Viewport:
         self.window_size = window_size
         lw, lh = self.logical_size
         ww, wh = window_size
-        self.scale = min(ww / lw, wh / lh)
-        self.offset = ((ww - int(lw * self.scale))) // 2, (wh - int(lh * self.scale)) // 2.
+        self.scale = max(min(ww / lw, wh / lh), 1e-6) # no zero division
+        self.offset = ((ww - int(lw * self.scale)) // 2, (wh - int(lh * self.scale)) // 2)
     
     def window_to_logical(self, vector) -> tuple[int, int]:
         return (

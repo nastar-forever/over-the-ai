@@ -13,45 +13,44 @@ class SurfacesContainer(_base.PrimitiveRenderer):
     filters: list[Callable[[pygame.Surface], None]] = None
     filters_enabled: bool = False
     
+    def __post_init__(self):
+        self.surfaces = [
+            s if s.get_size() == self.size else pygame.transform.scale(s, self.size)
+            for s in  self.surfaces
+        ]
+    
     def get(self) -> _base.GetReturn:
-        surface = self.surfaces[self.variant]
-
-        if not self.filters_enabled:
-            return _base.GetReturn(
-                surface, self.size
-            )
+        surf = self.surfaces[self.variant]
         
-        surf = surface.copy()
-        for filter in self.filters:
-            filter(surf)
+        if self.filters_enabled and self.filters:
+            surf = surf.copy()
+            for filter in self.filters:
+                filter(surf)
         return _base.GetReturn(surf, self.size)
     
     def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]):
         ret = self.get()
         parent_surface.blit(ret.surface, ret.construct_rect(origin))
 
-
-vanilla = lambda surf: surf
-
 @dataclass
 class FilterArray:
     surfaces: list[SurfacesContainer]
     mask: list[bool]
     active_filters: list[Callable[[pygame.Surface], None]]
-    inactive_filters: list[Callable[[pygame.Surface], None]] = field(default=[vanilla])
+    inactive_filters: list[Callable[[pygame.Surface], None]] = field(default_factory=list)
     _applied: list[bool] = field(init=False)
     
     def __post_init__(self):
-        self._applied = [False] * len(self.surfaces)
-        for surf in self.surfaces:
-            surf.filters = self.inactive_filters
-            surf.filters_enabled = True
+        self._applied = [None] * len(self.surfaces)
+        self.update()
     
     def update(self):
-        for i, (surf, applied, mask) in enumerate(zip(self.surfaces, self._applied, self.mask)):
-            if mask == applied: continue
+        for i, (surf, mask) in enumerate(zip(self.surfaces, self.mask)):
+            if self._applied[i] == mask:
+                continue
             self._applied[i] = mask
-            surf.filters = self.active_filters if mask else self.inactive_filters 
+            surf.filters = self.active_filters if mask else self.inactive_filters
+            surf.filters_enabled = bool(surf.filters)
     
     def get(self) -> list[pygame.Surface]:
         return [surf.get() for surf in self.surfaces]

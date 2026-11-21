@@ -18,6 +18,17 @@ class AnimationFrameContext:
     position: tuple[int, int] = (0, 0)
     variant: int = -1 # -1 means don't change
 
+def _merge(base: AnimationFrameContext, new: AnimationFrameContext):
+    if new.variant != -1:
+        base.variant = new.variant
+    if new.postype == "absolute":
+        base.postype, base.position = "absolute", new.position
+    else:
+        base.position = tuple(
+            base.position[i] + new.position[i]
+            for i in range(2)
+        )
+
 class Animation(ABC):
     @property
     def would_loop(self) -> bool:
@@ -47,6 +58,10 @@ class SpriteAnim(LoopingAnimation):
     frame_duration: float # float
     _elapsed: float = field(init=False, default=0)
     _curr_frame: int = field(init=False, default=0)
+    
+    def __post_init__(self):
+        if self.frame_duration <= 0 or self.frame_counts <= 0:
+            raise ValueError("frame_duration and frame_counts must be > 0")
     
     def update(self, delta):
         self._elapsed += delta
@@ -81,35 +96,49 @@ class TweenAnim(Animation):
     def __post_init__(self):
         self._elapsed >= self.duration
     
-    def is_done(self):
-        return self._lerped == self.tween_to
+    def _pos(self):
+        t = 1.0 if self.duration <= 0 else min(self._elapsed / self.duration, 1.0)
+        e = self.ease_func(t)
+        return tuple(round(a + (b - a) * e) for a, b in zip(self.tween_from, self.tween_to))
     
-    def update(self, start, curr):
-        t = min(self._elapsed / self.duration, 1)
-        self._lerped = tuple(self.tween_from[i] + (self.tween_to[i] - self.tween_from[i]) * self.ease_func(t) for i in range(2))
-        
+    def update(self, delta):
+        self._elapsed += delta
+        return self.get()
+    
+    def get(self):
         return AnimationFrameContext(
             self.postype,
-            self._lerped
+            self._pos()
         )
     
     def get(self):
-        return AnimationFrameContext(self.postype, self._lerped)
+        return AnimationFrameContext(
+            self.postype,
+            self._pos()
+        )
+    
+    def is_done(self):
+        return self._elapsed >= self.duration
     
     def reset(self):
-        self._lerped = self.tween_from
         self._elapsed = 0
 
 
 class AnimationQueue:
     def __init__(self, *anims: Animation):
         self.anims: deque[Animation] = deque(anims)
+        self._all = anims
     
     def push(self, anim: Animation):
         self.anims.append(anim)
     
     def skip(self):
         self.anims.popleft()
+    
+    def reset(self):
+        for anim in self.anims:
+            anim.reset()
+        self.anims = deque(self._all)
     
     def update(self, delta):
         self.anims[0].update(delta)
@@ -133,163 +162,181 @@ class AnimationParallel:
     
     def is_done(self):
         return all(anim.is_done() for anim in self.anims)
-
-
-class _AnimationPlayer(ABC):
-    def __init__(self):
-        self.starttime = 0
-        self.playing = False
-    
-    def play(self, time: float|None):
-        self.starttime = pygame.time.get_ticks() if time is None else time
-        self.playing = True
-    
-    @staticmethod
-    def fallback() -> AnimationFrameContext: return AnimationFrameContext()
-    def is_done(self) -> bool: ...
-    
-    def update(self, delta: float) -> AnimationFrameContext: ...
-    
-    def __call__(self, *args, **kwargs):
-        if self.is_done():
-            self.stop()
-            return self.fallback()
-        
-        if not self.playing:
-            return self.fallback()
-        
-        ret = self.update(*args, **kwargs)
-        return ret
-    
-
-    @abstractmethod
-    def get(self) -> AnimationFrameContext: ...
-    
-    @abstractmethod
-    def reset(self): ...
-
-    def stop(self):
-        self.starttime = 0
-        self.playing = False
-        self.reset()
-    
-
-class GeneralAnimationPlayer(_AnimationPlayer):
-    def __init__(self, animation: Animation):
-        super().__init__()
-        self.animation = animation
-    
-    def is_done(self):
-        return self.animation.is_done()
-    
-    def update(self, delta):
-        return self.animation.update(delta)
-    
-    def get(self):
-        return self.animation.get()
     
     def reset(self):
-        self.animation.reset()
-        self.starttime = pygame.time.get_ticks()
+        for anim in self.anims:
+            anim.reset()
+
+
+# class _AnimationPlayer(ABC):
+#     def __init__(self):
+#         self.starttime = 0
+#         self.playing = False
+    
+#     def play(self, time: float|None):
+#         self.starttime = pygame.time.get_ticks() if time is None else time
+#         self.playing = True
+    
+#     @staticmethod
+#     def fallback() -> AnimationFrameContext: return AnimationFrameContext()
+#     def is_done(self) -> bool: ...
+    
+#     def update(self, delta: float) -> AnimationFrameContext: ...
+    
+#     def __call__(self, *args, **kwargs):
+#         if self.is_done():
+#             self.stop()
+#             return self.fallback()
+        
+#         if not self.playing:
+#             return self.fallback()
+        
+#         ret = self.update(*args, **kwargs)
+#         return ret
+    
+
+#     @abstractmethod
+#     def get(self) -> AnimationFrameContext: ...
+    
+#     @abstractmethod
+#     def reset(self): ...
+
+#     def stop(self):
+        # self.starttime = 0
+        # self.playing = False
+        # self.reset()
+    
+
+# class GeneralAnimationPlayer(_AnimationPlayer):
+#     def __init__(self, animation: Animation):
+#         super().__init__()
+#         self.animation = animation
+    
+#     def is_done(self):
+#         return self.animation.is_done()
+    
+#     def update(self, delta):
+#         return self.animation.update(delta)
+    
+#     def get(self):
+#         return self.animation.get()
+    
+#     def reset(self):
+#         self.animation.reset()
+#         self.starttime = pygame.time.get_ticks()
     
 @dataclass
 class _ArrayAnimationPlayerElement:
     animation: Animation
     mask: list[bool]
-    active: bool
-    starttime: int
+    playing: bool
     
 class _ArrayAnimationPlayerObject(_base.RefObject):
-    def __init__(self, parent: ArrayAnimationPlayer):
-        self.parent = parent
-        self.source = parent.tokendict
+    animation = property(
+        lambda self: self._general_getter("animation"),
+        lambda self, val: self._general_setter("animation", val)
+    )
+    mask = property(
+        lambda self: self._general_getter("mask"),
+        lambda self, val: self._general_setter("mask", val)
+    )
     
-    @property
-    def animation(self): return self._general_getter("animation")
-    @animation.setter
-    def animation(self, val): self._general_setter("animation", val)
-    
-    @property
-    def mask(self): return self._general_getter("mask")
-    @mask.setter
-    def mask(self, val): self._general_setter("mask", val)
-    
-    def play(self):
-        self._general_setter("active", True)
-        self._general_setter("starttime", pygame.time.get_ticks())
-    
-    def stop(self):
-        self._general_setter("active", False)
-        self._general_setter("starttime", 0)
-    
-    def remove(self):
-        del self.source[id(self)]
+    def play(self): self._general_setter("playing", True)
+    def stop(self): self._general_setter("playing", False)
+    def remove(self): del self.source[self.key]
 
-class ArrayAnimationPlayer(_AnimationPlayer):
+class ArrayAnimationPlayer:
     def __init__(self):
-        super().__init__()
-        self.tokendict: dict[int, _ArrayAnimationPlayerElement] = {}
-    
+        self.elements: dict[int, _ArrayAnimationPlayerElement] = {}
+        self._next_k = 0
+        
     def add_animation(self, animation: Animation, mask: list[bool]) -> _ArrayAnimationPlayerObject:
-        token = _ArrayAnimationPlayerObject(self)
-        self.tokendict[id(token)] = _ArrayAnimationPlayerElement(animation, mask, False, 0)
-        return token
-    
-    
-    def fallback(self):
-        return [AnimationFrameContext() for _ in range(len(self.tokendict))]
+        key, self._next_k = self._next_k, self._next_k + 1
+        self.elements[key] = _ArrayAnimationPlayerElement(animation, mask, False)
+        return _ArrayAnimationPlayerObject(self, self.elements, mask)
     
     def is_done(self):
-        return all([token.animation.is_done() for token in self.tokendict.values()])
+        return all(el.animation.is_done() for el in self.elements if el.playing)
     
-    def reset(self):
-        for token in self.tokendict.values():
-            token.animation.reset()
-        self.starttime = pygame.time.get_ticks()
-        
-    def update(self, delta, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
-        if not self.tokendict:
-            return []
-        
-        length = len(list(self.tokendict.values())[0][1])
-        ctxs = [AnimationFrameContext(postype=postype) for _ in range(length)]
-        
-        for key, (anim, mask, playing, starttime) in self.tokendict.items():
-            if not playing:
-                continue
+    def get_for(self, n: int, delta: float|None = None) -> list[AnimationFrameContext]:
+        ctxs = [AnimationFrameContext() for _ in range(n)]
+        for el in self.elements.values():
+            if not el.playing: continue
             
-            if anim.is_done():
-                self.tokendict[key].active = False
-                continue
+            advance = delta is not None and not el.animation.is_done()
+            ctx = el.animation.update(delta) if advance else el.animation.get()
             
-            ctxframe = anim.update(delta)
-            
-            for i, m in enumerate(mask):
-                if not m:
-                    continue
-                
-                ctxs[i].variant = ctxframe.variant
-                ctxs[i].position = ctxframe.position if ctxframe.postype == "absolute" else (
-                    ctxframe.position[0] + origin[0],
-                    ctxframe.position[1] + origin[1]
-                )
+            for i, m in enumerate(el.mask):
+                if m:
+                    _merge(ctxs[i], ctx)
         return ctxs
+
+# class ArrayAnimationPlayer:
+#     def __init__(self):
+#         super().__init__()
+#         self.elements: dict[int, _ArrayAnimationPlayerElement] = {}
+#         self._next_k = 0
     
-    def get(self, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
-        ctxs = []
+#     def add_animation(self, animation: Animation, mask: list[bool]) -> _ArrayAnimationPlayerObject:
+#         key, self._next_k = self._next_k, self._next_k + 1
+#         self.elements[key] = _ArrayAnimationPlayerElement(animation, mask, False)
+#         return _ArrayAnimationPlayerObject(self, self.elements, key)
+    
+    
+#     def fallback(self):
+#         return [AnimationFrameContext() for _ in range(len(self.elements))]
+    
+#     def is_done(self):
+#         return all([token.animation.is_done() for token in self.elements.values() if token.playing])
+    
+#     def reset(self):
+#         for token in self.elements.values():
+#             token.animation.reset()
+#         self.starttime = pygame.time.get_ticks()
         
-        for element in self.tokendict.values():
-            if not element.active:
-                continue
+#     def update(self, delta, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
+#         if not self.elements:
+#             return []
+        
+#         length = len(list(self.elements.values())[0][1])
+#         ctxs = [AnimationFrameContext(postype=postype) for _ in range(length)]
+        
+#         for key, (anim, mask, playing, starttime) in self.elements.items():
+#             if not playing:
+#                 continue
             
-            for m in element.mask:
-                if not m:
-                    continue
+#             if anim.is_done():
+#                 self.elements[key].active = False
+#                 continue
+            
+#             ctxframe = anim.update(delta)
+            
+#             for i, m in enumerate(mask):
+#                 if not m:
+#                     continue
                 
-                ctxframe = element.animation.get()
-                ctxs.append(AnimationFrameContext(
-                    postype,
-                    ctxframe.position if ctxframe.postype == "absolute" else tuple(ctxframe.position[i] + origin[i] for i in range(2)),
-                    ctxframe.variant
-                ))
-        return ctxs
+#                 ctxs[i].variant = ctxframe.variant
+#                 ctxs[i].position = ctxframe.position if ctxframe.postype == "absolute" else (
+#                     ctxframe.position[0] + origin[0],
+#                     ctxframe.position[1] + origin[1]
+#                 )
+#         return ctxs
+    
+#     def get(self, origin: tuple[int, int], postype: Literal["relative", "absolute"] = "absolute"):
+#         ctxs = []
+        
+#         for element in self.elements.values():
+#             if not element.active:
+#                 continue
+            
+#             for m in element.mask:
+#                 if not m:
+#                     continue
+                
+#                 ctxframe = element.animation.get()
+#                 ctxs.append(AnimationFrameContext(
+#                     postype,
+#                     ctxframe.position if ctxframe.postype == "absolute" else tuple(ctxframe.position[i] + origin[i] for i in range(2)),
+#                     ctxframe.variant
+#                 ))
+#         return ctxs
