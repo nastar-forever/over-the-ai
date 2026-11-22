@@ -6,12 +6,13 @@ from typing import Callable
 
 from . import _base
 
-@dataclass
+@dataclass(eq=False)
 class SurfacesContainer(_base.PrimitiveRenderer):
     surfaces: list[pygame.Surface]
     size: tuple[int, int]
     filters: list[Callable[[pygame.Surface], None]] = None
     filters_enabled: bool = False
+    variant: int = 0
     
     def __post_init__(self):
         self.surfaces = [

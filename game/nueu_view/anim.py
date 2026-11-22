@@ -28,7 +28,7 @@ class ContextValue(Generic[T]):
 @dataclass
 class AnimationFrameContext:
     position: ContextValue[tuple[int, int]] = field(default_factory=lambda: ContextValue((0, 0)))
-    rotation: ContextValue[float] = field(default_factory=lambda: ContextValue(0.0, "absolute"))
+    rotation: ContextValue[float] = field(default_factory=lambda: ContextValue(0.0, "relative"))
     scale: ContextValue[float] = field(default_factory=lambda: ContextValue(1.0, "absolute"))
     variant: int = -1 # -1 means unchanged
     

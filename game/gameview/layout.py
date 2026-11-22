@@ -11,7 +11,7 @@ class InvisRowLayout(layout.RowLayout):
     
     def positions(self):
         pos = super().positions()
-        pos[self.invisidx][0] = 9999 # Hide it, lol
+        pos[self.invisidx] = (9999, 9999) # Hide it, lol
         return pos
 
 @dataclass
@@ -32,7 +32,7 @@ class BentRowLayout(layout.UniformRowLayout):
         pos = [(round(x), round(y)) for x, y in pos]
         
         if 0 <= self.invisidx < len(pos):
-            pos[self.invisidx][0] = 9999
+            pos[self.invisidx] = (9999, 9999)
         return pos
 
     def rotations(self):

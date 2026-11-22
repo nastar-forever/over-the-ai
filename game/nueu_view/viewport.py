@@ -40,5 +40,4 @@ class Viewport:
     
     def scale_surface(self, surface: pygame.Surface) -> pygame.Surface:
         size = (int(self.logical_size[0] * self.scale), int(self.logical_size[1] * self.scale))
-        scaled = surface if size == surface.get_size() else pygame.transform.scale(surface, size)
-        return scaled
+        return surface if size == surface.get_size() else pygame.transform.smoothscale(surface, size)

@@ -92,8 +92,7 @@ class TextRenderer(_base.PrimitiveRenderer):
     def get(self) -> _base.GetReturn:
         if self._surface is None:
             self._surface = self._font.render(
-                self._text, True, self.color,
-                wraplength=self._max_width or 0,
+                self._text, True, self.color, None, self._max_width or 0,
             )
         return _base.GetReturn(self._surface, self._surface.get_size())
 

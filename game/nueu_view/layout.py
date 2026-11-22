@@ -18,11 +18,12 @@ class _LayoutReturn:
 @dataclass
 class Layout(_base.PrimitiveRenderer, ABC):
     animations: anim.ArrayAnimationPlayer
+    items: list = field(default_factory=list, kw_only=True)
     _delta: float|None = field(init=False, default=None, repr=False)
     _surface: pygame.Surface|None = field(init=False, default=None, repr=False)
 
     def unchanging(self, type: Literal["positions", "rotations"]): # helper users can use
-        return [(0, 0) if type == "positions" else 0 for _ in range(self.items)]
+        return [(0, 0) if type == "positions" else 0 for _ in range(len(self.items))]
 
     # User-defined methods
     @property
@@ -144,6 +145,9 @@ class UniformGridLayout(Layout):
         for pos in self._pos_map:
             poses.append((pos[0] * self.width, pos[1] * self.height))
         return poses
+    
+    def rotations(self):
+        return self.unchanging("rotations")
 
 
 @dataclass

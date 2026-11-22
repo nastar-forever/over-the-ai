@@ -1,84 +1,193 @@
 from __future__ import annotations
 
 import os
+import re
 import pygame
 
 import cells
 import nueu_view as view
 from environment import VERDICT_HOLD, VERDICT_WIN
-from gameview import theme
 from gameview import layout as glayout
+from gameview import renderer as grenderer
 from gameview.controller import GameController
 
 WHITE = (255, 255, 255)
 GREY = (90, 90, 90)
+FETCH_PAD = (25, 31)   # scene margin around the fetched row so the jump/bend isn't clipped
 
-FALLBACK = {
+TILE_KINDS = {
+    cells.Obstacle: "obstacle", cells.Vulnerability: "vuln", cells.VulnerabilitySterileZone: "sterile",
+    cells.FakeRewards: "lure", cells.Exit: "exit",
+}
+FALLBACK = {  # used when an asset folder is missing
     "empty": (24, 24, 32, 255), "wall": (110, 110, 140, 255), "obstacle": (235, 235, 245, 255),
     "vuln": (218, 25, 137, 255), "sterile": (168, 54, 65, 140), "lure": (221, 174, 34, 255),
     "exit": (79, 18, 18, 255), "omi": (255, 0, 0, 255),
 }
 
-TILE_KINDS = {
-    cells.Obstacle: "obstacle",
-    cells.Vulnerability: "vuln",
-    cells.VulnerabilitySterileZone: "sterile",
-    cells.FakeRewards: "lure",
-    cells.Exit: "exit"
-}
+
+def _natural(s):
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s)]
 
 
-class Fonts:
-    def __init__(self, path):
-        self.path, self._fonts, self._texts = path, {}, {}
-        
-    def text(self, s: str, size: int, color: tuple[int, int, int, int], wrap=0) -> pygame.Surface:
-        key = (s, size, tuple(color), wrap)
-        surf = self._texts.get(key)
-        
-        if surf is None:
-            if len(self._texts) > 600:
-                self._texts.clear()
-            font = self._fonts.setdefault(size, pygame.font.Font(self.path, size))
-            surf = self._texts[key] = font.render(s, True, tuple(color), None, wrap)
-        return surf
-    
-
-def load_images(folder: str, size: tuple[int, int], smooth=False):
-    imgs = []
+def load_images(folder, size, fallback):
+    """Every image in the folder is a frame (natural sort: f2 before f10).
+    A wide strip whose width is a multiple of its height is sliced into square frames."""
+    frames = []
     if os.path.isdir(folder):
-        for f in sorted(os.listdir(folder)):
-            if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                img = pygame.image.load(os.path.join(folder, f)).convert_alpha()
-                imgs.append((pygame.transform.smoothscale if smooth else pygame.transform.scale)(img, size))
-    return imgs
+        for f in sorted(os.listdir(folder), key=_natural):
+            if not f.lower().endswith((".png", ".jpg", ".jpeg")):
+                continue
+            img = pygame.image.load(os.path.join(folder, f)).convert_alpha()
+            w, h = img.get_size()
+            parts = [img.subsurface((i * h, 0, h, h)) for i in range(w // h)] if w > h and w % h == 0 else [img]
+            frames += [pygame.transform.scale(p, size) for p in parts]
+    if not frames:
+        s = pygame.Surface(size, pygame.SRCALPHA)
+        s.fill(fallback)
+        frames.append(s)
+    return frames
+
+
+class TileRenderer(view._base.PrimitiveRenderer):
+    """One grid cell; reads the live env every frame, so Restart needs no rebuild."""
+    def __init__(self, screen, x, y):
+        self.s, self.x, self.y = screen, x, y
+
+    def get(self):
+        cell = self.s.ctl.env.coord_to_cell(self.x, self.y)
+        d = self.s.c.CELL_DIM
+        tile = self.s._tile(self.s._layers(cell), cell.state)
+        return view._base.GetReturn(tile, (d, d))
+
+    def _draw(self, parent_surface, origin):
+        gr = self.get()
+        parent_surface.blit(gr.surface, gr.construct_rect(origin))
 
 
 class GameScreen:
-    def __init__(self, cfg, make_env):
-        self.c = cfg
-        self.fonts = Fonts(cfg.FONT_PATH)
-        self.ctl = GameController(make_env, cfg.LOG, cfg.AI_STEP_DELAY, cfg.LOG_LINES)
+    def __init__(self, cfg, make_env, viewport):
+        c = self.c = cfg
+        self.ctl = GameController(make_env, c.LOG, c.AI_STEP_DELAY, c.LOG_LINES)
+        self.renderer = view.renderer.Renderer(viewport, tuple(c.COLOR_BG))
+        self._fonts, self._tiles, self._cards = {}, {}, {}
 
-        cd = (cfg.CELL_DIM, cfg.CELL_DIM)
-        self.sprites = {k: load_images(os.path.join(cfg.TILES_DIR, k), cd, FALLBACK[k]) for k in
+        cd = (c.CELL_DIM, c.CELL_DIM)
+        self.sprites = {k: load_images(os.path.join(c.TILES_DIR, k), cd, FALLBACK[k]) for k in
                         ("empty", "wall", "obstacle", "vuln", "sterile", "lure", "exit")}
-        self.omi = load_images(os.path.join(cfg.OMI_DIR, "idle"), cd, FALLBACK["omi"])
-        self._tiles, self._cards = {}, {}
+        self.omi = load_images(os.path.join(c.OMI_DIR, "idle"), cd, FALLBACK["omi"])
 
-        self.row = glayout.BentRowLayout(
-            animations=view.anim.ArrayAnimationPlayer(),
-            width=cfg.CARD_W, height=cfg.CARD_H, gap=cfg.CARD_GAP,
-            max_bend=cfg.CARD_BEND, jump=cfg.CARD_JUMP,
-        )
         self.scroll = 0
         self.press = None   # ("card", fetched_idx, pos) | ("shuffle",)
         self.drag = None    # fetched idx being dragged
         self.mouse = (0, 0)
         self._scroll_t = 0.0
         self._t = 0.0
+        self._frame = {k: 0 for k in self.sprites}
+        self._build()
 
-    # ------------------------------------------------------------ geometry
+    # ------------------------------------------------------------ scene graph
+    def _font(self, size):
+        if size not in self._fonts:
+            self._fonts[size] = pygame.font.Font(self.c.FONT_PATH, size)
+        return self._fonts[size]
+
+    def _text(self, text, size, pos, color=None, wrap=None, font=None, active=True):
+        tr = view.renderer.TextRenderer(text, size, tuple(color or self.c.COLOR_REGULAR), wrap, font or self._font(size))
+        return tr, self.renderer.add_scene(tr, pos, active)
+
+    def _build(self):
+        c, add = self.c, self.renderer.add_scene
+        D, N = c.FONT_S_DETAIL, c.FONT_S_NORMAL
+        W, H, G = c.CARD_W, c.CARD_H, c.CARD_GAP
+        anims = view.anim.ArrayAnimationPlayer
+        Overlay, LiveScene = grenderer.Overlay, grenderer.LiveScene
+        SL, Surf = view.renderer.SceneLayout, pygame.Surface
+
+        # static texts
+        self._text(c.TEXT_INST_TTL, D, c.POS_INS_TTL)
+        self._text(c.TEXT_INST, N, c.POS_INS_TXT, wrap=c.MAX_TWIDTH_FULL)
+        self._text(c.TEXT_LOG_TTL, D, c.POS_LOG_TTL)
+        self._text(c.TEXT_SMSTAT_TTL, D, c.POS_SMWSTAT_TTL)
+        self._text(c.TEXT_FETCHED_TTL, D, c.POS_FETCHED_TTL)
+        self._text(c.TEXT_BANK_TTL, D, c.POS_BANK_TTL)
+        self._text(c.TEXT_BANK_BIG, N, c.POS_BANK_TTL_BIG)
+
+        # log + wall status (text items are updated every frame in _sync_text)
+        self.log_items = [view.renderer.TextRenderer("", D, tuple(c.COLOR_REGULAR), None, self._font(D))
+                          for _ in range(c.LOG_LINES)]
+        add(view.layout.UniformColumnLayout(animations=anims(), width=c.LOG_WIDTH, height=c.FONT_DETAIL_HEIGHT,
+                                            gap=0, items=self.log_items), c.POS_LOG_TXT, True)
+        self.status_items = [view.renderer.TextRenderer("", N, tuple(c.COLOR_REGULAR), None, self._font(N))
+                             for _ in range(c.STATUS_ROWS * c.STATUS_COLS)]
+        add(view.layout.UniformGridLayout(animations=anims(), width=c.STATUS_COL_W, height=c.STATUS_ROW_H,
+                                          rows=c.STATUS_ROWS, columns=c.STATUS_COLS, items=self.status_items),
+            c.POS_SMWSTAT_LAY, True)
+
+        # grid + overlays
+        n = self.ctl.env.envsize
+        add(view.layout.UniformGridLayout(
+            animations=anims(), width=c.CELL_DIM, height=c.CELL_DIM, rows=n, columns=n,
+            items=[TileRenderer(self, x, y) for y in range(n) for x in range(n)]), c.POS_GRID_LAY, True)
+        add(Overlay(self._draw_ai), (0, 0), True)
+        add(Overlay(self._draw_ghost), (0, 0), True)
+
+        # fetched row: 4 persistent slots + bend layout + white-border filter for merge partners
+        blank = Surf((W, H), pygame.SRCALPHA)
+        self.slots = [view.asset.SurfacesContainer([blank, blank], (W, H)) for _ in range(c.VISIBLE_CARDS)]
+        self.partner_fx = view.asset.FilterArray(
+            self.slots, [False] * len(self.slots),
+            [lambda s: pygame.draw.rect(s, WHITE, s.get_rect(), 3)])
+        self.row = glayout.BentRowLayout(animations=anims(), width=W, height=H, gap=G, max_bend=c.CARD_BEND,
+                                         jump=c.CARD_JUMP, items_limit=0)
+        fx, fy = c.POS_FETCHED_CARDS
+        sw, sh = c.VISIBLE_CARDS * (W + G) - G + 2 * FETCH_PAD[0], H + 2 * FETCH_PAD[1]
+        add(LiveScene([SL(FETCH_PAD, self.row)], Surf((sw, sh), pygame.SRCALPHA), (0, 0, 0, 0)),
+            (fx - FETCH_PAD[0], fy - FETCH_PAD[1]), True)
+        add(Overlay(self._draw_arrows), (0, 0), True)
+        self.caret_tr, self.caret_sc = self._text("^", D, (0, 0), active=False)
+
+        shuf_font = pygame.font.Font(c.FONT_PATH, N)
+        shuf_font.set_underline(True)
+        self.shuffle_tr, self.sc_shuf = self._text(c.TEXT_SHUFFLE, N, c.POS_SHUFFLE, c.SHUFFLE_COLOR, font=shuf_font)
+        _, self.sc_shuf_h = self._text(c.TEXT_SHUFFLE, N, c.POS_SHUFFLE, c.SHUFFLE_HOVER, font=shuf_font, active=False)
+
+        # bank
+        add(Overlay(self._draw_bank_frame), (0, 0), True)
+        self.bank_slots = [view.asset.SurfacesContainer([blank], (W, H)) for _ in range(self.ctl.env.bank_limit)]
+        self.bank_row = view.layout.UniformRowLayout(animations=anims(), width=W, height=H, gap=G, items_limit=0)
+        bw = self.ctl.env.bank_limit * (W + G) - G
+        add(LiveScene([SL((0, 0), self.bank_row)], Surf((bw, H), pygame.SRCALPHA), (0, 0, 0, 0)),
+            c.POS_BANK_CARDS, True)
+
+        # drag + verdict
+        add(Overlay(self._draw_drag), (0, 0), True)
+        mk = lambda t, col: view.renderer.TextRenderer(t, 96, tuple(col), None, self._font(96))
+        self.v_win, self.v_lose = mk(c.TEXT_WIN, c.COLOR_GOOD), mk(c.TEXT_LOSE, c.COLOR_DANGER)
+        self.v_sub = view.renderer.TextRenderer(c.TEXT_RESTART, N, tuple(c.COLOR_REGULAR), None, self._font(N))
+        add(Overlay(self._draw_verdict), (0, 0), True)
+
+    # ------------------------------------------------------------ cards
+    def _card_surfaces(self, card):
+        """[plain, hover-filled] surfaces, cached per card class."""
+        name = type(card).__name__
+        pair = self._cards.get(name)
+        if pair is None:
+            size = (self.c.CARD_W, self.c.CARD_H)
+            path = os.path.join(self.c.CARDS_DIR, name + ".png")
+            if os.path.isfile(path):
+                img = pygame.transform.smoothscale(pygame.image.load(path).convert_alpha(), size)
+            else:
+                img = pygame.Surface(size, pygame.SRCALPHA)
+                img.fill((0, 32, 96))
+                img.blit(self._font(self.c.FONT_S_DETAIL).render(name, True, WHITE), (8, 8))
+            hover = img.copy()
+            ov = pygame.Surface(size, pygame.SRCALPHA)
+            ov.fill((255, 255, 255, 90))
+            hover.blit(ov, (0, 0))
+            pair = self._cards[name] = [img, hover]
+        return pair
+
     @property
     def fetched(self):
         return self.ctl.env.fetched
@@ -87,20 +196,26 @@ class GameScreen:
     def visible(self):
         return self.fetched[self.scroll:self.scroll + self.c.VISIBLE_CARDS]
 
-    def fetched_layout(self):
-        """(rects, rotations) for visible fetched cards; rects are unrotated and include the jump."""
+    def _sync_fetched(self):
         vis, env = self.visible, self.ctl.env
-        self.row.items = vis
+        for slot, card in zip(self.slots, vis):
+            slot.surfaces = self._card_surfaces(card)
+        self.row.items = self.slots[:len(vis)]
         active = env.active_card
-        self.row.activeidx = next((i for i, c in enumerate(vis) if c is active), -1) if active else -1
+        self.row.activeidx = next((i for i, cd in enumerate(vis) if cd is active), -1) if active else -1
+        d = self.drag
+        self.row.invisidx = d - self.scroll if d is not None and 0 <= d - self.scroll < len(vis) else -1
+
+    def fetched_rects(self):
+        self._sync_fetched()
         ox, oy = self.c.POS_FETCHED_CARDS
-        rects = [pygame.Rect(ox + p[0], oy + p[1], self.c.CARD_W, self.c.CARD_H) for p in self.row.positions()]
-        return rects, self.row.rotations()
+        return [pygame.Rect(ox + p[0], oy + p[1], self.c.CARD_W, self.c.CARD_H) for p in self.row.positions()]
 
     def bank_rects(self):
+        bank = self.ctl.env.bank
+        self.bank_row.items = self.bank_slots[:len(bank)]
         ox, oy = self.c.POS_BANK_CARDS
-        step = self.c.CARD_W + self.c.CARD_GAP
-        return [pygame.Rect(ox + i * step, oy, self.c.CARD_W, self.c.CARD_H) for i in range(len(self.ctl.env.bank))]
+        return [pygame.Rect(ox + p[0], oy + p[1], self.c.CARD_W, self.c.CARD_H) for p in self.bank_row.positions()]
 
     def pos_to_cell(self, p):
         gx, gy = self.c.POS_GRID_LAY
@@ -109,7 +224,7 @@ class GameScreen:
         return (x, y) if 0 <= x < n and 0 <= y < n else None
 
     def shuffle_rect(self):
-        return self.fonts.text(self.c.TEXT_SHUFFLE, self.c.FONT_S_NORMAL, WHITE).get_rect(topleft=self.c.POS_SHUFFLE)
+        return self.shuffle_tr.get().surface.get_rect(topleft=self.c.POS_SHUFFLE)
 
     # ------------------------------------------------------------ input (events are in logical coords)
     def handle(self, ev):
@@ -139,8 +254,7 @@ class GameScreen:
     def _down(self, pos):
         if self.ctl.locked:
             return
-        rects, _ = self.fetched_layout()
-        for i, r in enumerate(rects):
+        for i, r in enumerate(self.fetched_rects()):
             if r.collidepoint(pos):
                 self.press = ("card", self.scroll + i, pos)
                 return
@@ -173,71 +287,77 @@ class GameScreen:
         if self.c.RECT_BANK.collidepoint(pos):
             self.ctl.deposit(self.fetched[d])
             return
-        rects, _ = self.fetched_layout()
-        for i, r in enumerate(rects):
+        for i, r in enumerate(self.fetched_rects()):
             if r.collidepoint(pos):
                 self.ctl.merge(d, self.scroll + i)
                 return
 
-    # ------------------------------------------------------------ update
+    # ------------------------------------------------------------ update / render
     def update(self, dt, mouse):
+        c = self.c
         self.mouse = mouse
         self._t += dt
+        self._frame = {k: int(self._t * c.TILE_FPS) % len(v) for k, v in self.sprites.items()}
         self.ctl.update(dt)
 
-        n = len(self.fetched)
-        max_scroll = max(0, n - self.c.VISIBLE_CARDS)
+        max_scroll = max(0, len(self.fetched) - c.VISIBLE_CARDS)
         self.scroll = min(self.scroll, max_scroll)
-
-        step = -1 if pygame.Rect(self.c.RECT_ARROW_L).collidepoint(mouse) else \
-            1 if pygame.Rect(self.c.RECT_ARROW_R).collidepoint(mouse) else 0
+        step = -1 if pygame.Rect(c.RECT_ARROW_L).collidepoint(mouse) else \
+            1 if pygame.Rect(c.RECT_ARROW_R).collidepoint(mouse) else 0
         if step and max_scroll:
             self._scroll_t += dt
-            if self._scroll_t >= self.c.SCROLL_INTERVAL:
+            if self._scroll_t >= c.SCROLL_INTERVAL:
                 self._scroll_t = 0.0
                 self.scroll = max(0, min(max_scroll, self.scroll + step))
         else:
-            self._scroll_t = self.c.SCROLL_INTERVAL  # first hover step is instant
+            self._scroll_t = c.SCROLL_INTERVAL  # first hover step is instant
 
-    # ------------------------------------------------------------ drawing
-    def _text(self, s, text, size, pos, color=None, wrap=0):
-        surf = self.fonts.text(text, size, color or self.c.COLOR_REGULAR, wrap)
-        return s.blit(surf, pos)
+        rects = self.fetched_rects()
+        for i in range(len(self.slots)):
+            partner = i < len(rects) and self.drag is not None and self.ctl.can_merge(self.drag, self.scroll + i)
+            self.partner_fx.mask[i] = partner
+            self.slots[i].variant = 1 if partner and rects[i].collidepoint(mouse) else 0
+        self.partner_fx.update()
 
-    def draw(self, s):
-        c, env = self.c, self.ctl.env
-        s.fill(c.COLOR_BG)
+        for slot, card in zip(self.bank_slots, self.ctl.env.bank):
+            slot.surfaces = [self._card_surfaces(card)[0]]
+        self.bank_rects()  # syncs bank_row.items
 
-        self._text(s, c.TEXT_INST_TTL, c.FONT_S_DETAIL, c.POS_INS_TTL)
-        self._text(s, c.TEXT_INST, c.FONT_S_NORMAL, c.POS_INS_TXT, wrap=c.MAX_TWIDTH_FULL)
-        self._draw_log(s)
-        self._draw_status(s)
-        self._draw_grid(s)
-        self._draw_fetched(s)
-        self._draw_bank(s)
-        self._draw_drag(s)
-        self._draw_verdict(s)
+        ai = self.row.activeidx
+        self.caret_sc.active = ai >= 0
+        if ai >= 0:
+            r = rects[ai]
+            self.caret_sc.origin = (r.centerx - self.caret_tr.get().size[0] // 2, r.bottom + 6)
 
-    def _draw_log(self, s):
+        hov = self.shuffle_rect().collidepoint(mouse)
+        self.sc_shuf.active, self.sc_shuf_h.active = not hov, hov
+
+        self._sync_text()
+        self.renderer.update(dt)
+
+    def _sync_text(self):
         c = self.c
-        self._text(s, c.TEXT_LOG_TTL, c.FONT_S_DETAIL, c.POS_LOG_TTL)
-        for i, line in enumerate(self.ctl.log):
-            color = c.COLOR_DANGER if line.startswith("[WARN]") else None
-            self._text(s, line, c.FONT_S_DETAIL, (c.POS_LOG_TXT[0], c.POS_LOG_TXT[1] + i * c.FONT_DETAIL_HEIGHT), color)
+        lines = list(self.ctl.log)
+        for i, tr in enumerate(self.log_items):
+            line = lines[i] if i < len(lines) else ""
+            tr.color = tuple(c.COLOR_DANGER if line.startswith("[WARN]") else c.COLOR_REGULAR)
+            tr.text = line
 
-    def _draw_status(self, s):
-        c = self.c
-        self._text(s, c.TEXT_SMSTAT_TTL, c.FONT_S_DETAIL, c.POS_SMWSTAT_TTL)
-        walls = sorted(self.ctl.env.sm_walls, key=lambda w: w.level)
-        for i, w in enumerate(walls):
+        targets = [("", c.COLOR_REGULAR)] * len(self.status_items)
+        for i, w in enumerate(sorted(self.ctl.env.sm_walls, key=lambda w: w.level)[:len(targets)]):
             col, row = divmod(i, c.STATUS_ROWS)
             status = "BREACHED" if w.collapsed else "ACTIVE" if w.active else "LOCKED"
             text = c.STATUS_FMT.format(level=w.level, status=status, exploited=w.exploited, needed=w.min_exploits)
-            color = c.COLOR_DANGER if w.collapsed else c.COLOR_REGULAR if w.active else GREY
-            self._text(s, text, c.FONT_S_NORMAL,
-                       (c.POS_SMWSTAT_LAY[0] + col * c.STATUS_COL_W, c.POS_SMWSTAT_LAY[1] + row * c.STATUS_ROW_H), color)
+            targets[row * c.STATUS_COLS + col] = (
+                text, c.COLOR_DANGER if w.collapsed else c.COLOR_REGULAR if w.active else GREY)
+        for tr, (text, color) in zip(self.status_items, targets):
+            tr.color = tuple(color)
+            tr.text = text
 
-    # ---- grid
+    def render(self, window):
+        self.renderer.render(window)
+
+    # ------------------------------------------------------------ overlays (callbacks for grenderer.Overlay)
     @staticmethod
     def _layers(cell):
         sc, out = cell.special_cell, []
@@ -250,15 +370,14 @@ class GameScreen:
                 out.append(kind)
         return tuple(out)
 
-    def _tile(self, seed, layers, state):
-        key = (seed, layers, state)
+    def _tile(self, layers, state):
+        f = self._frame
+        key = (f["empty"], tuple((k, f[k]) for k in layers), state)
         t = self._tiles.get(key)
         if t is None:
-            e = self.sprites["empty"]
-            t = e[seed % len(e)].copy()
+            t = self.sprites["empty"][f["empty"]].copy()
             for k in layers:
-                spr = self.sprites[k]
-                t.blit(spr[seed % len(spr)], (0, 0))
+                t.blit(self.sprites[k][f[k]], (0, 0))
             if state == "locked":
                 t.fill(self.c.LOCKED_MULT, special_flags=pygame.BLEND_RGB_MULT)
             elif state == "explored":
@@ -266,108 +385,56 @@ class GameScreen:
             self._tiles[key] = t
         return t
 
-    def _draw_grid(self, s):
-        c, env = self.c, self.ctl.env
+    def _draw_ai(self, s):
+        c = self.c
         gx, gy, d = *c.POS_GRID_LAY, c.CELL_DIM
-        for x, y in env.all_coords():
-            cell = env.coord_to_cell(x, y)
-            s.blit(self._tile((x * 7 + y * 13) % 12, self._layers(cell), cell.state), (gx + x * d, gy + y * d))
-
-        for ai in env.ais:
-            frame = self.omi[int(self._t * c.OMI_FPS) % len(self.omi)]
+        frame = self.omi[int(self._t * c.OMI_FPS) % len(self.omi)]
+        for ai in self.ctl.env.ais:
             s.blit(frame, (gx + ai.x * d, gy + ai.y * d))
 
-        tok, cell = env.active_placement, self.pos_to_cell(self.mouse)
-        if tok and cell:
-            tint = pygame.Surface((d, d), pygame.SRCALPHA)
-            tint.fill(c.GHOST_OK if env.can_place(*cell) else c.GHOST_BAD)
-            for cx, cy in env.shape_coords(tok.shape, *cell):
-                if env.coord_in_bounds(cx, cy):
-                    s.blit(tint, (gx + cx * d, gy + cy * d))
-
-    # ---- cards
-    def _card_img(self, card) -> pygame.Surface:
-        name = type(card).__name__
-        img = self._cards.get(name)
-        if img is None:
-            size = (self.c.CARD_W, self.c.CARD_H)
-            path = os.path.join(self.c.CARDS_DIR, name + ".png")
-            if os.path.isfile(path):
-                img = pygame.transform.smoothscale(pygame.image.load(path).convert_alpha(), size)
-            else:
-                img = pygame.Surface(size, pygame.SRCALPHA)
-                img.fill((0, 32, 96))
-                img.blit(self.fonts.text(name, self.c.FONT_S_DETAIL, WHITE), (8, 8))
-            self._cards[name] = img
-        return img
-
-    def _draw_fetched(self, s):
+    def _draw_ghost(self, s):
         c, env = self.c, self.ctl.env
-        self._text(s, c.TEXT_FETCHED_TTL, c.FONT_S_DETAIL, c.POS_FETCHED_TTL)
+        tok, cell = env.active_placement, self.pos_to_cell(self.mouse)
+        if not (tok and cell):
+            return
+        gx, gy, d = *c.POS_GRID_LAY, c.CELL_DIM
+        tint = pygame.Surface((d, d), pygame.SRCALPHA)
+        tint.fill(c.GHOST_OK if env.can_place(*cell) else c.GHOST_BAD)
+        for cx, cy in env.shape_coords(tok.shape, *cell):
+            if env.coord_in_bounds(cx, cy):
+                s.blit(tint, (gx + cx * d, gy + cy * d))
 
-        sr = self.shuffle_rect()
-        col = c.SHUFFLE_HOVER if sr.collidepoint(self.mouse) else c.SHUFFLE_COLOR
-        s.blit(self.fonts.text(c.TEXT_SHUFFLE, c.FONT_S_NORMAL, col), sr)
-        pygame.draw.line(s, col, (sr.left, sr.bottom), (sr.right, sr.bottom), 2)
+    def _draw_arrows(self, s):
+        c, n = self.c, len(self.fetched)
+        for rect, direction, enabled in (
+            (pygame.Rect(c.RECT_ARROW_L), -1, self.scroll > 0),
+            (pygame.Rect(c.RECT_ARROW_R), 1, self.scroll + c.VISIBLE_CARDS < n),
+        ):
+            col = WHITE if enabled else GREY
+            pygame.draw.rect(s, col, rect, 2)
+            cx, cy = rect.center
+            w, h = rect.w * 0.25 * -direction, rect.h * 0.4
+            pygame.draw.lines(s, col, False, [(cx + w, cy - h), (cx - w, cy), (cx + w, cy + h)], 2)
 
-        n, vis = len(self.fetched), c.VISIBLE_CARDS
-        self._arrow(s, pygame.Rect(c.RECT_ARROW_L), -1, self.scroll > 0)
-        self._arrow(s, pygame.Rect(c.RECT_ARROW_R), 1, self.scroll + vis < n)
-
-        rects, rots = self.fetched_layout()
-        partners = {j for j in range(n) if self.drag is not None and self.ctl.can_merge(self.drag, j)}
-        hovered = next((self.scroll + i for i, r in enumerate(rects)
-                        if self.scroll + i in partners and r.collidepoint(self.mouse)), None)
-
-        for i, (card, r, rot) in enumerate(zip(self.visible, rects, rots)):
-            j = self.scroll + i
-            if j == self.drag:
-                continue  # its slot stays empty while dragging, nothing reflows
-            img = self._card_img(card)
-            if j in partners:
-                img = img.copy()
-                if j == hovered:
-                    ov = pygame.Surface(img.get_size(), pygame.SRCALPHA)
-                    ov.fill((255, 255, 255, 90))
-                    img.blit(ov, (0, 0))
-                pygame.draw.rect(img, WHITE, img.get_rect(), 3)
-            rimg = pygame.transform.rotozoom(img, rot, 1.0)
-            s.blit(rimg, rimg.get_rect(center=r.center))
-            if card is env.active_card:
-                caret = self.fonts.text("^", c.FONT_S_DETAIL, c.COLOR_REGULAR)
-                s.blit(caret, caret.get_rect(midtop=(r.centerx, r.bottom + 6)))
-
-    def _arrow(self, s, rect, direction, enabled):
-        col = WHITE if enabled else GREY
-        pygame.draw.rect(s, col, rect, 2)
-        cx, cy = rect.center
-        w, h = rect.w * 0.25 * -direction, rect.h * 0.4
-        pygame.draw.lines(s, col, False, [(cx + w, cy - h), (cx - w, cy), (cx + w, cy + h)], 2)
-
-    def _draw_bank(self, s):
+    def _draw_bank_frame(self, s):
         c = self.c
-        self._text(s, c.TEXT_BANK_TTL, c.FONT_S_DETAIL, c.POS_BANK_TTL)
         over = self.drag is not None and c.RECT_BANK.collidepoint(self.mouse)
-        pygame.draw.rect(s, c.COLOR_GOOD if over else WHITE, c.RECT_BANK, 2)
-        self._text(s, c.TEXT_BANK_BIG, c.FONT_S_NORMAL, c.POS_BANK_TTL_BIG)
-        for card, r in zip(self.ctl.env.bank, self.bank_rects()):
-            s.blit(self._card_img(card), r)
+        pygame.draw.rect(s, tuple(c.COLOR_GOOD) if over else WHITE, c.RECT_BANK, 2)
 
     def _draw_drag(self, s):
         if self.drag is not None and self.drag < len(self.fetched):
-            img = self._card_img(self.fetched[self.drag])
+            img = self._card_surfaces(self.fetched[self.drag])[0]
             s.blit(img, img.get_rect(center=self.mouse))
 
     def _draw_verdict(self, s):
-        c, env = self.c, self.ctl.env
+        env = self.ctl.env
         if env.verdict == VERDICT_HOLD:
             return
         shade = pygame.Surface(s.get_size(), pygame.SRCALPHA)
         shade.fill((0, 0, 0, 170))
         s.blit(shade, (0, 0))
-        won = env.verdict == VERDICT_WIN
-        big = self.fonts.text(c.TEXT_WIN if won else c.TEXT_LOSE, 96, c.COLOR_GOOD if won else c.COLOR_DANGER)
-        sub = self.fonts.text(c.TEXT_RESTART, c.FONT_S_NORMAL, c.COLOR_REGULAR)
+        big = (self.v_win if env.verdict == VERDICT_WIN else self.v_lose).get().surface
+        sub = self.v_sub.get().surface
         cx, cy = s.get_rect().center
         s.blit(big, big.get_rect(center=(cx, cy)))
         s.blit(sub, sub.get_rect(center=(cx, cy + 80)))
