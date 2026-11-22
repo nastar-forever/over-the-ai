@@ -1,3 +1,4 @@
+import sys
 import os
 import asyncio
 from types import SimpleNamespace
@@ -24,7 +25,11 @@ WINDOW_SIZE = (1280, 720)
 FPS = 60
 COLOR_BG = (0, 0, 0)
 
-ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+def resource_path(*parts):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+ASSETS = resource_path("assets")
 FONT_PATH = os.path.join(ASSETS, "fonts", "IBM Plex Mono", "IBMPlexMono-Regular.ttf")
 CARDS_DIR = os.path.join(ASSETS, "cards")
 TILES_DIR = os.path.join(ASSETS, "spritesheets", "tiles")

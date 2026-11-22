@@ -27,7 +27,7 @@ Don't let OMI exploit sandbox vulnerabilities they require (the purple dots) or 
 Apparently, NVAI made their sandbox with at least decent level of effort. So the sandbox equipped with a few Security Measure Walls (SM Walls) the AI cannot escape (unless they exploit enough vulnerabilities of course!). Those walls will give you some rooms to breathe.
 
 # How this project was built?
-This project written in Python, using PyGame and bagged into an HTML5 website by using PyInstaller. All done in Visual Studio Code.
+This project written in Python, using PyGame and convert it to .exe by using PyInstaller. All done in Visual Studio Code.
 
 # How to play it?
 You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
