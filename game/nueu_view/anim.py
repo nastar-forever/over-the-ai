@@ -280,7 +280,6 @@ class _ArrayAnimationPlayerObject(_base.RefObject):
     
     def play(self): self._general_setter("playing", True)
     def stop(self): self._general_setter("playing", False)
-    def remove(self): del self.source[self.key]
 
 class ArrayAnimationPlayer:
     def __init__(self):
@@ -290,10 +289,10 @@ class ArrayAnimationPlayer:
     def add_animation(self, animation: Animation, mask: list[bool]) -> _ArrayAnimationPlayerObject:
         key, self._next_k = self._next_k, self._next_k + 1
         self.elements[key] = _ArrayAnimationPlayerElement(animation, mask, False)
-        return _ArrayAnimationPlayerObject(self, self.elements, mask)
+        return _ArrayAnimationPlayerObject(self, self.elements, key)
     
     def is_done(self):
-        return all(el.animation.is_done() for el in self.elements if el.playing)
+        return all(el.animation.is_done() for el in self.elements.values() if el.playing)
     
     def get_for(self, n: int, delta: float|None = None) -> list[AnimationFrameContext]:
         ctxs = [AnimationFrameContext() for _ in range(n)]

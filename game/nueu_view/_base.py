@@ -18,9 +18,10 @@ class RefObject:
         self.parent, self.source, self.key = parent, source, key
 
     def _general_getter(self, attr):
-        return getattr(self.source(self.key), attr)
+        return getattr(self.source[self.key], attr)
     def _general_setter(self, attr, val):
         setattr(self.key, attr, val)
+    def remove(self): del self.source[self.key]
 
 class PrimitiveRenderer(ABC):
     def update(self, delta: float) -> None: ... # Optional
