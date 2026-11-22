@@ -28,7 +28,7 @@ class UI:
         self.linked[widget.trigger_pgevent] = widget
     
     def _log_event(self, event: WidgetEvent):
-        self.inputstack.append(WidgetEvent)
+        self.inputstack.append(event)
         if event in self.listeners:
             for listener in self.listeners[event].values(): listener(event)
             
@@ -90,7 +90,7 @@ class Widget(ABC):
     master: UI
     visual: asset.SurfacesContainer
     rect: pygame.Rect
-    enabled: bool = True
+    enabled: bool = field(init=False, default=False)
     
     def __post_init__(self):
         self.master._link(self)

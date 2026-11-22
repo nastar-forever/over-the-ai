@@ -18,7 +18,6 @@ class _LayoutReturn:
 @dataclass
 class Layout(_base.PrimitiveRenderer, ABC):
     animations: anim.ArrayAnimationPlayer
-    items: list[_base.PrimitiveRenderer] = field(default_factory=list)
     _delta: float|None = field(init=False, default=None, repr=False)
     _surface: pygame.Surface|None = field(init=False, default=None, repr=False)
 
@@ -41,7 +40,7 @@ class Layout(_base.PrimitiveRenderer, ABC):
         raise IndexError(f"{len(self.items)} items is beyond the limit ({self.items_limit})")
     
     
-    def _resolve(cv: anim.ContextValue, base, combine):
+    def _resolve(self, cv: anim.ContextValue, base, combine):
         return cv.value if cv.type == "absolute" else combine(base, cv.value)
     
     def __call__(self, origin, delta: float | None = None) -> list[_LayoutReturn]:
@@ -106,6 +105,20 @@ class Layout(_base.PrimitiveRenderer, ABC):
 
 @dataclass
 class UniformGridLayout(Layout):
+    # def __init__(
+    #     self,
+    #     width: int,
+    #     height: int,
+    #     rows: int,
+    #     columns: int,
+    #     animations: anim.ArrayAnimationPlayer,
+    #     items: list[_base.PrimitiveRenderer]|None = None
+    # ):
+    #     self.width = width
+    #     self.height = height
+    #     self.rows = rows
+    #     self.columns = columns
+    #     super().__init__(animations, [] if items is None else items)
     width: int
     height: int
     rows: int
@@ -135,7 +148,6 @@ class UniformGridLayout(Layout):
 
 @dataclass
 class RowLayout(Layout):
-    gap: int
     items_limit: int = -1
     
     def cut(self):
@@ -154,7 +166,7 @@ class RowLayout(Layout):
         return out
     
     def rotations(self):
-        self.unchanging("rotations")
+        return self.unchanging("rotations")
     
     def size(self):
         return max([pos[0] for pos in self.positions()]) + self.items[-1].get().size[0]
@@ -166,6 +178,20 @@ class UniformRowLayout(Layout):
     height: int
     gap: int
     items_limit: int = -1
+    # def __init__(
+    #     self,
+    #     width: int,
+    #     height: int,
+    #     gap: int,
+    #     animations: anim.ArrayAnimationPlayer,
+    #     items_limit: int = -1,
+    #     items: list|None = None
+    # ):
+    #     self.width = width
+    #     self.height = height
+    #     self.gap = gap
+    #     self.items_limit = items_limit
+    #     super().__init__(animations, [] if items is None else items)
     
     def cut(self):
         self.items = self.items[self.items_limit:]
@@ -188,6 +214,20 @@ class UniformColumnLayout(Layout):
     height: int
     gap: int
     items_limit: int = -1
+    # def __init__(
+    #     self,
+    #     width: int,
+    #     height: int,
+    #     gap: int,
+    #     animations: anim.ArrayAnimationPlayer,
+    #     items_limit: int = -1,
+    #     items: list|None = None
+    # ):
+    #     self.width = width
+    #     self.height = height
+    #     self.gap = gap
+    #     self.items_limit = items_limit
+    #     super().__init__(animations, [] if items is None else items)
 
     def cut(self):
         self.items = self.items[self.items_limit:]    

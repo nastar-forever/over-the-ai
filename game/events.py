@@ -49,3 +49,20 @@ class ModfierActivated(GameEvent):
 @dataclass
 class VerdictReached(GameEvent):
     verdict: int
+
+    
+@dataclass
+class VulnExploited(GameEvent):
+    x: int
+    y: int
+    wall_level: int | None
+
+@dataclass
+class LureEaten(GameEvent):
+    x: int
+    y: int
+
+@dataclass
+class ExitReached(GameEvent):
+    x: int
+    y: int

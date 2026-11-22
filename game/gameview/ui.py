@@ -9,7 +9,7 @@ class Button(ui.Widget):
     hoverfilter: view.asset.FilterArray
     clickfilter: view.asset.FilterArray
     idx: int
-    trigger_pgevent: pygame.event.Event = field(init=False, default=[
+    trigger_pgevent: pygame.event.Event = field(init=False, default_factory=lambda: [
         pygame.MOUSEBUTTONDOWN,
         pygame.MOUSEBUTTONUP
     ])

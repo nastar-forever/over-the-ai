@@ -575,6 +575,16 @@ class Environment(_Environment):
             if not self.is_passable(cell):
                 break
 
+            sc = cell.special_cell
+
+            if isinstance(sc, cells.Vulnerability) and not sc.used and sc.wall is not None and sc.wall.active:
+                self.emit(events.VulnExploited(nx, ny, sc.wall.level))
+            elif isinstance(sc, cells.FakeRewards) and not sc.used:
+                self.emit(events.LureEaten(nx, ny))
+            elif isinstance(sc, cells.Exit):
+                self.emit(events.ExitReached(nx, ny))
+                
+
             ai.x, ai.y = nx, ny
             path.append((nx, ny))
             cell.state = "explored"

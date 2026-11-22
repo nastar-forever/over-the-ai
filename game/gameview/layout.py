@@ -12,11 +12,13 @@ class InvisRowLayout(layout.RowLayout):
     def positions(self):
         pos = super().positions()
         pos[self.invisidx][0] = 9999 # Hide it, lol
+        return pos
 
 @dataclass
 class BentRowLayout(layout.UniformRowLayout):
     max_bend: int = 3
     jump: int = 20
+    items_limit: int = field(default=4)
     activeidx: int = field(init=False, default=-1)
     invisidx: int = field(init=False, default=-1)
 

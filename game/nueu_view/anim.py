@@ -37,8 +37,8 @@ def _merge(base: AnimationFrameContext, new: AnimationFrameContext):
     if new.variant != -1:
         base.variant = new.variant
     base.position.merge(new.position, _base.add2)
-    base.rotation.merge(new.position, operator.add)
-    base.rotation.merge(new.position, operator.mul)
+    base.rotation.merge(new.rotation, operator.add)
+    base.scale.merge(new.scale, operator.mul)
 
 class Animation(ABC):
     @property
