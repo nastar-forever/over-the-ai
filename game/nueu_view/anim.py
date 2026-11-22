@@ -65,20 +65,24 @@ class LoopingAnimation(Animation):
     
 @dataclass
 class SpriteAnim(LoopingAnimation):
-    frame_counts: int
     frame_duration: float # float
+    frame_start: int
+    frame_end: int|None = None
     _elapsed: float = field(init=False, default=0)
-    _curr_frame: int = field(init=False, default=0)
+    _curr_frame: int = field(init=False)
     
     def __post_init__(self):
-        if self.frame_duration <= 0 or self.frame_counts <= 0:
+        if self.frame_duration <= 0 or self.frame_end - self.frame_start <= 0:
             raise ValueError("frame_duration and frame_counts must be > 0")
+        self._curr_frame = self.frame_start
     
     def update(self, delta):
         self._elapsed += delta
         while self._elapsed >= self.frame_duration:
             self._elapsed -= self.frame_duration
-            self._curr_frame = (self._curr_frame + 1) % self.frame_counts
+            self._curr_frame += 1
+            if (self._curr_frame > self.frame_end):
+                self._curr_frame = self.frame_start
             
         return AnimationFrameContext(variant=self._curr_frame)
 
@@ -87,7 +91,7 @@ class SpriteAnim(LoopingAnimation):
         return AnimationFrameContext(variant=self._curr_frame)
     
     def reset(self):
-        self._curr_frame = 0
+        self._curr_frame = self.frame_start
         self._elapsed = 0
     
 
@@ -278,7 +282,11 @@ class _ArrayAnimationPlayerObject(_base.RefObject):
         lambda self, val: self._general_setter("mask", val)
     )
     
-    def play(self): self._general_setter("playing", True)
+    def reset(self):
+        self._general_getter("animation").reset()
+    def play(self):
+        self.reset()
+        self._general_setter("playing", True)
     def stop(self): self._general_setter("playing", False)
 
 class ArrayAnimationPlayer:

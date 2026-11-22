@@ -1,0 +1,12 @@
+import pygame
+
+FONT_GENERAL = pygame.font.Font("assets/fonts/IBM Plex Mono/IBMPlexMono-Regular.ttf")
+
+FONT_S_DETAIL = 19
+FONT_S_NORMAL = 29
+FONT_DETAIL_HEIGHT = 25
+
+
+COLOR_GOOD = [13, 255, 0]
+COLOR_DANGER = [255, 0, 0]
+COLOR_REGULAR = [255, 255, 255]

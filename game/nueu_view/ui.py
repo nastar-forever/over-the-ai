@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pygame
 
-from enum import IntEnum
 from typing import Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -21,11 +20,12 @@ class UI:
     viewport: viewport.Viewport
     inputstack: list[WidgetEvent] = field(init=False, default_factory=list)
     listeners: dict[WidgetEvent, dict[int, Callable[[WidgetEvent], None]]] = field(init=False, default_factory=dict)
-    link: dict[pygame.event.Event, Widget] = field(init=False, default_factory=dict)
+    linked: dict[list[pygame.event.Event], Widget] = field(init=False, default_factory=dict)
     _next_k: int = field(init=False, default=0)
+    _hovering: list[Widget] = field(init=False, default_factory=list)
     
     def _link(self, widget: Widget):
-        self.link[widget.trigger_pgevent] = widget
+        self.linked[widget.trigger_pgevent] = widget
     
     def _log_event(self, event: WidgetEvent):
         self.inputstack.append(WidgetEvent)
@@ -51,13 +51,34 @@ class UI:
         return out
     
     
-    def handle(self, pgevent: pygame.event):
+    def handle(self, pgevent: pygame.event.Event):
         pgevent = self.viewport.pgevent_pos_to_logical(pgevent)
         
-        for trigpgevent, widget in self.link.items():
-            if isinstance(pgevent, trigpgevent) and widget.enabled:
+        for trigpgevent, widget in self.linked.items():
+            if pgevent.type in trigpgevent and widget.enabled:
                 self._log_event(widget.handle(pgevent))
+            if pgevent.type == pygame.MOUSEMOTION:
+                self.handle_mouse(self.viewport.offset)
     
+    def handle_mouse(self, origin: tuple[int, int] = (0, 0)):
+        lx, ly = self.viewport.window_to_logical(pygame.mouse.get_pos())
+        pos = lx - origin[0], ly - origin[1]
+        
+        for widget in self.linked.values():
+            if not widget.enabled: continue
+            inside = widget.rect.collidepoint(pos)
+            event = None
+            
+            if inside and widget not in self._hovering:
+                self._hovering.append(widget)
+                event = widget.on_hover_enter()
+                
+            elif not inside and widget in self._hovering:
+                self._hovering.remove(widget)
+                event = widget.on_hover_exit(pos)
+                
+            if event is not None:
+                self._log_event(event)
     
 @dataclass
 class WidgetEvent: # User can define their own
@@ -74,8 +95,12 @@ class Widget(ABC):
     def __post_init__(self):
         self.master._link(self)
     
+    # OPTIONALS
+    def on_hover_enter(self, position: tuple[int, int]) -> WidgetEvent|None: return None
+    def on_hover_exit(self, position: tuple[int, int]) -> WidgetEvent|None: return None
+    
     @property
     @abstractmethod
-    def trigger_pgevent(self) -> pygame.event.Event: ...
+    def trigger_pgevent(self) -> list[int]: ...
     @abstractmethod
     def handle(self, event: pygame.event.Event) -> WidgetEvent: ...

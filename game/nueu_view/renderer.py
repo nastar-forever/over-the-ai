@@ -53,6 +53,55 @@ class _RendererSceneObject(_base.RefObject):
     )
 
 
+class TextRenderer(_base.PrimitiveRenderer):
+    def __init__(
+        self,
+        text: str,
+        size: int,
+        color: tuple[int, int, int] = (255, 255, 255),
+        max_width: int | None = None, # None = no wrapping
+        font: pygame.font.Font | None = None,
+    ):
+        self._text = text
+        self._max_width = max_width
+        self.size = size
+        self.color = color
+        self._font = font
+        self._surface: pygame.Surface | None = None
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    @text.setter
+    def text(self, value: str) -> None:
+        if value != self._text:
+            self._text = value
+            self._surface = None
+
+    @property
+    def max_width(self) -> int | None:
+        return self._max_width
+
+    @max_width.setter
+    def max_width(self, value: int | None) -> None:
+        if value != self._max_width:
+            self._max_width = value
+            self._surface = None
+
+    def get(self) -> _base.GetReturn:
+        if self._surface is None:
+            self._surface = self._font.render(
+                self._text, True, self.color,
+                wraplength=self._max_width or 0,
+            )
+        return _base.GetReturn(self._surface, self._surface.get_size())
+
+    def _draw(self, parent_surface: pygame.Surface, origin: tuple[int, int]):
+        gr = self.get()
+        parent_surface.blit(gr.surface, gr.construct_rect(origin))
+
+
 @dataclass
 class _RendererSceneElement:
     renderer: _base.PrimitiveRenderer

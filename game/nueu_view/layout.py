@@ -16,9 +16,11 @@ class _LayoutReturn:
     position: tuple[int, int]
 
 @dataclass
-class Layout(ABC):
+class Layout(_base.PrimitiveRenderer, ABC):
     animations: anim.ArrayAnimationPlayer
-    items: list[asset.SurfacesContainer] = field(default_factory=list)
+    items: list[_base.PrimitiveRenderer] = field(default_factory=list)
+    _delta: float|None = field(init=False, default=None, repr=False)
+    _surface: pygame.Surface|None = field(init=False, default=None, repr=False)
 
     def unchanging(self, type: Literal["positions", "rotations"]): # helper users can use
         return [(0, 0) if type == "positions" else 0 for _ in range(self.items)]
@@ -27,6 +29,9 @@ class Layout(ABC):
     @property
     @abstractmethod
     def items_limit(self) -> int: ... # -1 or 0 for no limit
+    @property
+    @abstractmethod
+    def size(self) -> tuple[int, int]: ...
     @abstractmethod
     def positions(self) -> list[tuple[int, int]]: ... # RELATIVE POSITION
     @abstractmethod
@@ -58,7 +63,7 @@ class Layout(ABC):
         return out
             
     
-    def drain(self) -> list[asset.SurfacesContainer]:
+    def drain(self) -> list[_base.PrimitiveRenderer]:
         out = self.items
         self.items = []
         return out
@@ -67,14 +72,37 @@ class Layout(ABC):
         if len(self.items) > self.items_limit and self.items_limit > 0:
             self.cut()
     
-    def append(self, surfcont: asset.SurfacesContainer):
+    def append(self, surfcont: _base.PrimitiveRenderer):
         self.items.append(surfcont)
         self._checklen()
     
-    def fill(self, surfconts: list[asset.SurfacesContainer]):
+    def fill(self, surfconts: list[_base.PrimitiveRenderer]):
         self.items = surfconts
         self._checklen()
+        
+    def update(self, delta: float) -> None:
+        for item in self.items:
+            item.update(delta)
+        self._delta = delta
+    
+    def get(self) -> _base.GetReturn:
+        size = self.size
+        
+        if self._surface is None or self._surface.get_size() != size: # already check size changes
+            self._surface = pygame.Surface(size, pygame.SRCALPHA)
+        else:
+            self._surface.fill((0, 0, 0, 0))
 
+        for lr in self((0, 0), self._delta):
+            self._surface.blit(lr.gr.surface, lr.position)
+        
+        self._delta = None
+        return _base.GetReturn(self._surface, size)
+
+    def _draw(self, parent_surface, origin):
+        gr = self.get()
+        parent_surface.blit(gr.surface, gr.construct_rect(origin))
+        
 
 @dataclass
 class UniformGridLayout(Layout):
@@ -93,6 +121,9 @@ class UniformGridLayout(Layout):
     def _pos_map(self) -> list[tuple, tuple]:
         return [(x, y) for y in range(self.rows) for x in range(self.columns)]
     
+    @property
+    def size(self):
+        return (self.width * self.columns, self.height * self.rows)
     
     def positions(self):
         poses = []
@@ -100,3 +131,74 @@ class UniformGridLayout(Layout):
         for pos in self._pos_map:
             poses.append((pos[0] * self.width, pos[1] * self.height))
         return poses
+
+
+@dataclass
+class RowLayout(Layout):
+    gap: int
+    items_limit: int = -1
+    
+    def cut(self):
+        self.items = self.items[self.items_limit:]
+        
+    def positions(self):
+        out = []
+        lastx = 0
+        
+        for item in self.items:
+            size = item.get().size
+            
+            newx = lastx + size[0] + (self.gap if lastx else 0)
+            out.append((newx, 0))
+            lastx = newx
+        return out
+    
+    def rotations(self):
+        self.unchanging("rotations")
+    
+    def size(self):
+        return max([pos[0] for pos in self.positions()]) + self.items[-1].get().size[0]
+    
+
+@dataclass
+class UniformRowLayout(Layout):
+    width: int
+    height: int
+    gap: int
+    items_limit: int = -1
+    
+    def cut(self):
+        self.items = self.items[self.items_limit:]
+    
+    def positions(self):
+        return [(i*self.gap + i*self.width , 0) for i in range(len(self.items))]
+    
+    def rotations(self):
+        return self.unchanging("rotations")
+    
+    @property
+    def size(self):
+        n = len(self.items)
+        return (n * self.width + max(n - 1, 0) * self.gap, self.height)
+    
+    
+@dataclass
+class UniformColumnLayout(Layout):
+    width: int
+    height: int
+    gap: int
+    items_limit: int = -1
+
+    def cut(self):
+        self.items = self.items[self.items_limit:]    
+
+    def positions(self):
+        return [(0, i*self.gap+ i*self.height) for i in range(len(self.items))]
+    
+    def rotations(self):
+        return self.unchanging("rotations")
+    
+    @property
+    def size(self) -> tuple[int, int]:
+        n = len(self.items)
+        return (self.width, n * self.height + max(n - 1, 0) * self.gap)
