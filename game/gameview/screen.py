@@ -22,7 +22,7 @@ TILE_KINDS = {
 FALLBACK = {  # used when an asset folder is missing
     "empty": (24, 24, 32, 255), "wall": (110, 110, 140, 255), "obstacle": (235, 235, 245, 255),
     "vuln": (218, 25, 137, 255), "sterile": (168, 54, 65, 140), "lure": (221, 174, 34, 255),
-    "exit": (79, 18, 18, 255), "omi": (255, 0, 0, 255),
+    "exit": (79, 18, 18, 255), "omi": (255, 0, 0, 255), "corrupted": (58, 18, 46, 255),
 }
 
 
@@ -55,10 +55,11 @@ class TileRenderer(view._base.PrimitiveRenderer):
         self.s, self.x, self.y = screen, x, y
 
     def get(self):
-        cell = self.s.ctl.env.coord_to_cell(self.x, self.y)
-        d = self.s.c.CELL_DIM
-        tile = self.s._tile(self.s._layers(cell), cell.state)
-        return view._base.GetReturn(tile, (d, d))
+        s = self.s
+        cell = s.ctl.env.coord_to_cell(self.x, self.y)
+        layers, state = s.ctl.frozen.get((self.x, self.y)) or (s._layers(cell), cell.state)
+        d = s.c.CELL_DIM
+        return view._base.GetReturn(s._tile(layers, state), (d, d))
 
     def _draw(self, parent_surface, origin):
         gr = self.get()
@@ -68,13 +69,25 @@ class TileRenderer(view._base.PrimitiveRenderer):
 class GameScreen:
     def __init__(self, cfg, make_env, viewport):
         c = self.c = cfg
-        self.ctl = GameController(make_env, c.LOG, c.AI_STEP_DELAY, c.LOG_LINES)
+        self.ctl = GameController(
+            make_env, 
+            c.LOG, 
+            c.AI_STEP_DELAY, 
+            c.LOG_LINES,
+            snapshot=lambda cell: (self._layers(cell), cell.state),
+            walk_time=c.WALK_STEP_TIME,
+            dash_time=c.DASH_STEP_TIME,
+            win_delay=c.WIN_DELAY,
+            panic_steps=c.PANIC_STEPS,
+            panic_time=c.PANIC_STEP_TIME
+        )
         self.renderer = view.renderer.Renderer(viewport, tuple(c.COLOR_BG))
         self._fonts, self._tiles, self._cards = {}, {}, {}
 
         cd = (c.CELL_DIM, c.CELL_DIM)
         self.sprites = {k: load_images(os.path.join(c.TILES_DIR, k), cd, FALLBACK[k]) for k in
-                        ("empty", "wall", "obstacle", "vuln", "sterile", "lure", "exit")}
+            ("empty", "wall", "obstacle", "vuln", "sterile", "lure", "exit", "corrupted")
+        }
         self.omi = load_images(os.path.join(c.OMI_DIR, "idle"), cd, FALLBACK["omi"])
 
         self.scroll = 0
@@ -105,8 +118,9 @@ class GameScreen:
         SL, Surf = view.renderer.SceneLayout, pygame.Surface
 
         # static texts
+        self.inst_tr, _ = self._text("", N, c.POS_INS_TXT, wrap=c.MAX_TWIDTH_FULL)
         self._text(c.TEXT_INST_TTL, D, c.POS_INS_TTL)
-        self._text(c.TEXT_INST, N, c.POS_INS_TXT, wrap=c.MAX_TWIDTH_FULL)
+        # self._text(c.TEXT_INST, N, c.POS_INS_TXT, wrap=c.MAX_TWIDTH_FULL)
         self._text(c.TEXT_LOG_TTL, D, c.POS_LOG_TTL)
         self._text(c.TEXT_SMSTAT_TTL, D, c.POS_SMWSTAT_TTL)
         self._text(c.TEXT_FETCHED_TTL, D, c.POS_FETCHED_TTL)
@@ -238,9 +252,10 @@ class GameScreen:
                 c.rotate("ccw")
             elif ev.key == pygame.K_f:
                 c.rotate("flip")
-            elif ev.key == pygame.K_RETURN and c.env.verdict != VERDICT_HOLD:
+            elif ev.key == pygame.K_RETURN and c.verdict != VERDICT_HOLD:
                 c.restart()
                 self.scroll, self.press, self.drag = 0, None, None
+                
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             self._down(ev.pos)
         elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
@@ -354,6 +369,20 @@ class GameScreen:
             tr.color = tuple(color)
             tr.text = text
 
+        # turn / verdict banner
+        ctl, v = self.ctl, self.ctl.verdict
+        if v == VERDICT_WIN:
+            text, color = c.TEXT_INST_WIN, c.COLOR_GOOD
+        elif v != VERDICT_HOLD:
+            text, color = c.TEXT_INST_LOSE, c.COLOR_DANGER
+        elif ctl.player_turn:
+            text = c.TEXT_TURN_PLAYER.format(used=ctl.steps_used, limit=ctl.steps_limit)
+            color = c.COLOR_REGULAR
+        else:
+            text, color = c.TEXT_TURN_AI, c.COLOR_REGULAR
+        self.inst_tr.color = tuple(color)   # color first: only a text change clears the cached surface
+        self.inst_tr.text = text
+
     def render(self, window):
         self.renderer.render(window)
 
@@ -372,16 +401,18 @@ class GameScreen:
 
     def _tile(self, layers, state):
         f = self._frame
-        key = (f["empty"], tuple((k, f[k]) for k in layers), state)
+        explored = state == "explored"
+        key = (f["empty"], f["corrupted"] if explored else -1,
+               tuple((k, f[k]) for k in layers), state)
         t = self._tiles.get(key)
         if t is None:
             t = self.sprites["empty"][f["empty"]].copy()
             for k in layers:
                 t.blit(self.sprites[k][f[k]], (0, 0))
-            if state == "locked":
+            if explored:                                   # always on top, whatever the cell holds
+                t.blit(self.sprites["corrupted"][f["corrupted"]], (0, 0))
+            elif state == "locked":
                 t.fill(self.c.LOCKED_MULT, special_flags=pygame.BLEND_RGB_MULT)
-            elif state == "explored":
-                t.fill(self.c.EXPLORED_MULT, special_flags=pygame.BLEND_RGB_MULT)
             self._tiles[key] = t
         return t
 
@@ -389,8 +420,9 @@ class GameScreen:
         c = self.c
         gx, gy, d = *c.POS_GRID_LAY, c.CELL_DIM
         frame = self.omi[int(self._t * c.OMI_FPS) % len(self.omi)]
-        for ai in self.ctl.env.ais:
-            s.blit(frame, (gx + ai.x * d, gy + ai.y * d))
+        for i, ai in enumerate(self.ctl.env.ais):
+            x, y = self.ctl.ai_pos.get(i, (ai.x, ai.y))
+            s.blit(frame, (gx + x * d, gy + y * d))
 
     def _draw_ghost(self, s):
         c, env = self.c, self.ctl.env
@@ -427,13 +459,16 @@ class GameScreen:
             s.blit(img, img.get_rect(center=self.mouse))
 
     def _draw_verdict(self, s):
+        v = self.ctl.verdict
+        if v == VERDICT_HOLD:
+            return
         env = self.ctl.env
         if env.verdict == VERDICT_HOLD:
             return
         shade = pygame.Surface(s.get_size(), pygame.SRCALPHA)
         shade.fill((0, 0, 0, 170))
         s.blit(shade, (0, 0))
-        big = (self.v_win if env.verdict == VERDICT_WIN else self.v_lose).get().surface
+        big = (self.v_win if v == VERDICT_WIN else self.v_lose).get().surface
         sub = self.v_sub.get().surface
         cx, cy = s.get_rect().center
         s.blit(big, big.get_rect(center=(cx, cy)))

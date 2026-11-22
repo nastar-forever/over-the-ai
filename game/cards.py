@@ -52,6 +52,8 @@ class Card:
     merging_partners: ClassVar[list[Card]] = []
     get_from_recipes_only: ClassVar[bool] = False
     
+    def __post_init__(self): pass
+    
     def on_activation(self, bank: list[Card], fetched: list[Card]) -> ActionToken:
         return
     

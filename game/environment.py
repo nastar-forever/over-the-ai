@@ -277,6 +277,7 @@ class Environment(_Environment):
                     self.mstate.max_player_stepcount
                 ))
         self._refill_if_empty()
+        self._check_win()
         
     
     def play_card(self, card) -> bool:
@@ -497,48 +498,61 @@ class Environment(_Environment):
             sc = sc.child
         return isinstance(sc, cells.Obstacle)
     
-    def _flood(self, start: tuple[int, int]) -> tuple[set[tuple[int, int]], bool]: # (reachable coords, sealed)
+    def _could_reach(self, start: tuple[int, int]) -> tuple[set[tuple[int, int]], bool]:
+        """Everything OMI could ever reach if every SM wall collapsed. sealed=True means it can never get out."""
         seen, queue, sealed = {start}, deque([start]), True
         while queue:
             x, y = queue.popleft()
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = x + dx, y + dy
-                
                 if (nx, ny) in seen:
                     continue
                 if not self.coord_in_bounds(nx, ny):
                     sealed = False
                     continue
-                
-                cell = self.coord_to_cell(nx, ny)
-                if self.is_passable(cell):
-                    seen.add((nx, ny))
-                    queue.append((nx, ny))
-                    
-                elif not self._is_player_block(cell):
-                    sealed = False
+                if self._is_player_block(self.coord_to_cell(nx, ny)):
+                    continue
+                seen.add((nx, ny))
+                queue.append((nx, ny))
         return seen, sealed
-    
+
+    def reachable_cells(self, start: tuple[int, int]) -> set[tuple[int, int]]:
+        """Cells OMI can walk on right now (used for the win panic). Exit cells are left out."""
+        seen, queue = {start}, deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (x + dx, y + dy)
+                if n in seen or not self.coord_in_bounds(*n):
+                    continue
+                cell = self.coord_to_cell(*n)
+                if self.is_passable(cell) and not isinstance(cell.special_cell, cells.Exit):
+                    seen.add(n)
+                    queue.append(n)
+        return seen
+
     def are_ais_isolated(self) -> bool:
-        return all(self._flood((ai.x, ai.y))[1] for ai in self.ais)
-    
+        return all(self._could_reach((ai.x, ai.y))[1] for ai in self.ais)
+
+    @staticmethod
+    def _vuln_of(cell: cells.Cell) -> cells.Vulnerability | None:
+        sc = cell.special_cell
+        if isinstance(sc, cells.SMWallCell):
+            sc = sc.child
+        return sc if isinstance(sc, cells.Vulnerability) else None
+
     def are_ais_starved(self) -> bool:
         reachable = set()
-        
         for ai in self.ais:
-            reachable |= self._flood((ai.x, ai.y))[0]
-        reachable_ids = {id(self.coord_to_cell(*p)) for p in reachable}
-        
+            reachable |= self._could_reach((ai.x, ai.y))[0]
+
         for wall in self.sm_walls:
-            if not wall.active or wall.collapsed:
+            if wall.collapsed:
                 continue
-            
             available = sum(
                 1 for cell in wall.vuln_cells
-                if isinstance(cell.special_cell, cells.Vulnerability)
-                and not cell.special_cell.used and id(cell) in reachable_ids
+                if (v := self._vuln_of(cell)) and not v.used and self.cell_to_coord(cell) in reachable
             )
-            
             if available < wall.min_exploits - wall.exploited:
                 return True
         return False

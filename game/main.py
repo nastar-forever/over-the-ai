@@ -18,7 +18,6 @@ GRIDSIZE = 15
 # otherwise there's no room for 3-5 flaws with sterile zones. More walls => bigger GRIDSIZE.
 WALL_RINGS = (1, 2, 3)
 POOL = [[cards.Stone, 10], [cards.Wall, 6], [cards.Edge, 3], [cards.Lure, 1]]
-AI_STEP_DELAY = 0.4          # seconds between the player's last step and the AI moving
 
 LOGICAL_SIZE = (1920, 1080)
 WINDOW_SIZE = (1280, 720)
@@ -30,8 +29,15 @@ FONT_PATH = os.path.join(ASSETS, "fonts", "IBM Plex Mono", "IBMPlexMono-Regular.
 CARDS_DIR = os.path.join(ASSETS, "cards")
 TILES_DIR = os.path.join(ASSETS, "spritesheets", "tiles")
 OMI_DIR = os.path.join(ASSETS, "spritesheets", "omi")
+
 OMI_FPS = 6
 TILE_FPS = 2
+AI_STEP_DELAY = 0.8
+WALK_STEP_TIME = 0.12
+DASH_STEP_TIME = 0.03
+WIN_DELAY = 0.9
+PANIC_STEPS = 40
+PANIC_STEP_TIME = 0.06
 
 POS_INS_TTL = (154, 129)
 POS_INS_TXT = (154, 152)
@@ -93,6 +99,10 @@ TEXT_BANK_BIG = "BANK (DRAG AND DROP)"
 TEXT_SHUFFLE = "Shuffle"
 TEXT_WIN, TEXT_LOSE = "OMI CONTAINED", "OMI ESCAPED"
 TEXT_RESTART = "Press Enter to restart"
+TEXT_TURN_PLAYER = "YOUR TURN ({used}/{limit})"
+TEXT_TURN_AI = "OMI TURN"
+TEXT_INST_WIN = "ISOLATION SUCCESS [WIN]"
+TEXT_INST_LOSE = "ACCESS DENIED [GAME OVER]"
 
 LOG_LINES = 7
 # str.format templates; a list = several lines. Lines starting with "[WARN]" are drawn red.
@@ -110,7 +120,7 @@ LOG = {
     "wall":      "[WARN] SM Wall LVL {level} breached",
     "exit":      "[WARN] Malicious network activity detected",
     "win":       "[INFO] 6172 isolated.",
-    "lose":      ["[INFO] Link established", "[WARN] Link s1urce is unknown", "[WARN] Running env/running/entity/OMIv0/revoke.sh"],
+    "lose":      ["[INFO] Link with remote terminal, established", "[INFO] Running env/running/entity/OMIv0/revoke.sh", "[WARN] Link source is unknown", "[WARN] Crash detected at 7724"],
 }
 
 
