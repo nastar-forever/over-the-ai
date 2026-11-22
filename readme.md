@@ -31,3 +31,40 @@ This project written in Python, using PyGame and bagged into an HTML5 website by
 
 # How to play it?
 You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
+
+## Controls:
+```
+Drag and drop  : Merging or deposit a card into bank
+Click on a card: Play that card or withdraw that card from bank
+Escape         : Cancel a placement/lure card
+R              : Rotate a placement
+F              : Flip placement
+```
+
+## Mechanics
+### AI
+The AI would pathfind into these tiles (in order, from lowest priority to highest priority)
+```
+[1] Vulnerability (yellow tiles)
+[2] Exit tiles
+[3] Lure tiles
+```
+
+When the AI step on an exit tile, it's a game over
+But the AI wouldn't be able to exit right away. There are several levels of SMWalls the AI must breach first. The AI could collapse an SMWall by stepping on (exploiting) enough Vulnerabilities (displayed on the top right).
+
+### Cards
+> Note:
+> Shuffling your card discard every fetched card (except bank) and draws you 4 new cards.
+#### Placement
+Perhaps most crucial card. You could place an obstacle to isolate the AI.
+
+#### Manipulations
+Well... Manipulate the AI. So far only Lure card were added into this category.
+
+### Bank
+The bank is the place where you can safely store your important cards (cards inside bank aren't affected by shuffling). The bank has a maximum capacity of four.
+
+Cards inside bank cannot be played nor merged until they're fetched.
+
+More cards to be added!
