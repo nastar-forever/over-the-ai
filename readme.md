@@ -48,6 +48,15 @@ You could just install the release [here](https://github.com/nastar-forever/over
 8. You have three steps/turns before OMI make a step.
 9. Shuffling, playing, merging, depositing, and withdrawing cards will take a step.
 
+### Controls:
+```
+Drag and drop  : Merging or deposit a card into bank
+Click on a card: Play that card or withdraw that card from bank
+Escape         : Cancel a placement/lure card
+R              : Rotate a placement
+F              : Flip placement
+```
+
 ## Special
 <details>
   <summary>For Terra reviewers, please click me.</summary>
@@ -61,15 +70,6 @@ You could just install the release [here](https://github.com/nastar-forever/over
   ### Week 5
   https://github.com/nastar-forever/over-the-ai/releases/tag/uhh_yeah_another_publish
 </details>
-
-### Controls:
-```
-Drag and drop  : Merging or deposit a card into bank
-Click on a card: Play that card or withdraw that card from bank
-Escape         : Cancel a placement/lure card
-R              : Rotate a placement
-F              : Flip placement
-```
 
 ### Mechanics
 #### AI
