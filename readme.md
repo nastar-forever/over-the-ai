@@ -1,4 +1,3 @@
-# What is this?
 > [!IMPORTANT]
 > # Note to Terra Reviewers:
 > I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**Special**](https://github.com/nastar-forever/over-the-ai#special). section
@@ -8,6 +7,8 @@
 
 > [!TIP]
 > If you need help, head over to [**Basic Tutorial**](https://github.com/nastar-forever/over-the-ai#how-to-play) or [**Mechanics**](https://github.com/nastar-forever/over-the-ai#mechanics) section
+
+# What is this?
 
 **A game where you play as a sandbox overseer program and prevent AI(s) from escaping their sandbox.** <sub>Inspired by OpenAI HuggingFace incident.</sub>
 
