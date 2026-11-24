@@ -80,8 +80,8 @@ The AI would pathfind into these tiles (in order, from lowest priority to highes
 [3] Lure tiles
 ```
 
-When the AI step on an exit tile, it's a game over
-But the AI wouldn't be able to exit right away. There are several levels of SMWalls the AI must breach first. The AI could collapse an SMWall by stepping on (exploiting) enough Vulnerabilities (displayed on the top right).
+When the AI step on an exit tile, it's a game over.
+But the AI wouldn't be able to exit right away. There are several levels of SMWalls the AI must breach first. The AI could collapse an SMWall by stepping on (`exploit`ing) enough `vulnerabilities` (displayed on the top right).
 
 #### Cards
 > Note:
