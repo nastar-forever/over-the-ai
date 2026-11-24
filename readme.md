@@ -1,7 +1,7 @@
 # What is this?
 > [!IMPORTANT]
 > # Note to Terra Reviewers:
-> I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**How to play** section](https://github.com/nastar-forever/over-the-ai/edit/master/readme.md#how-to-play).
+> I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**How to play** section](https://github.com/nastar-forever/over-the-ai#how-to-play).
 
 > [!NOTE]
 > This project is still on it's early stage. Expect bugs and clankiness
