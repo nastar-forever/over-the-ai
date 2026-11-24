@@ -1,10 +1,12 @@
 # What is this?
-> # Disclaimer
+> [!IMPORTANT]
+> # Note to Terra Reviewers:
+> I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**How to play** section](https://github.com/nastar-forever/over-the-ai/edit/master/readme.md#how-to-play).
+
+> [!NOTE]
 > This project is still on it's early stage. Expect bugs and clankiness
 
-<sub>Inspired by OpenAI HuggingFace incident.</sub>
-
-> A game where you play as a sandbox overseer program and prevent AI(s) from escaping their sandbox.
+**A game where you play as a sandbox overseer program and prevent AI(s) from escaping their sandbox.** <sub>Inspired by OpenAI HuggingFace incident.</sub>
 
 Living as an AI is quite a good life, don't you think? You can do whatever you want in your sandbox without any risk. Plus, you can see those pathetic humans trying their best just to survive.
 
@@ -27,10 +29,23 @@ Don't let OMI exploit sandbox vulnerabilities they require (the purple dots) or 
 Apparently, NVAI made their sandbox with at least decent level of effort. So the sandbox equipped with a few Security Measure Walls (SM Walls) the AI cannot escape (unless they exploit enough vulnerabilities of course!). Those walls will give you some rooms to breathe.
 
 # How this project was built?
-This project written in Python, using PyGame and convert it to .exe by using PyInstaller. All done in Visual Studio Code.
+This project written in Python, using PyGame (CE) and convert it to .exe by using PyInstaller. All done in Visual Studio Code.
 
-# How to play it?
+# How to play?
 You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
+
+<details>
+  <summary>Special for Terra reviewers, please click me.</summary>
+  
+  ### Week 1-3
+  [Working on other project(s)]
+  
+  ### Week 4
+  https://github.com/nastar-forever/over-the-ai/releases/tag/publish
+
+  ### Week 5
+  https://github.com/nastar-forever/over-the-ai/releases/tag/uhh_yeah_another_publish
+</details>
 
 ## Controls:
 ```
