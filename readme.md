@@ -1,10 +1,13 @@
 # What is this?
 > [!IMPORTANT]
 > # Note to Terra Reviewers:
-> I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**How to play** section](https://github.com/nastar-forever/over-the-ai#how-to-play).
+> I don't understand GitHub release pretty much, so I stupidly set the Week 4 and Week 5 demo to be always the latest release. I'm sorry, I just realized this mistake. In order to prevent misunderstandings, I attached a list of published version(s) and it's week under [**Special**](https://github.com/nastar-forever/over-the-ai#special). section
 
 > [!NOTE]
 > This project is still on it's early stage. Expect bugs and clankiness
+
+> [!TIP]
+> If you need help, head over to [**Basic Tutorial**](https://github.com/nastar-forever/over-the-ai#how-to-play) or [**Mechanics**](https://github.com/nastar-forever/over-the-ai#mechanics) section
 
 **A game where you play as a sandbox overseer program and prevent AI(s) from escaping their sandbox.** <sub>Inspired by OpenAI HuggingFace incident.</sub>
 
@@ -34,8 +37,20 @@ This project written in Python, using PyGame (CE) and convert it to .exe by usin
 # How to play?
 You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
 
+## Basic tutorial (I'm not yet made an in-game tutorial):
+1. You have two type of `deck`s. `fetched` and `bank`.
+2. `fetched` is your playing card, you can merge them to create a better card or deposit them into `bank`.
+3. Play a card by clicking on them. `deposit` a card by dragging it into bank, and `withdraw` a card by clicking a card from `bank`.
+4. You can `shuffle` your `fetched` card and hope for better cards (`bank` are unaffected by this `shuffle`)
+5. Your objective is to prevent OMI from escaping to the `exit` (reaching the edge/red map border).
+6. At first, OMI would have a limited mobility, but their mobility would expands as they unlock new `level`s, progressively towards the `exit`
+7. OMI can unlock `level` by `exploiting` (in-game mechanic term. `exploit` count when OMI stepped on a tile) enough `vulnerability`(s) (a yellow '!!!' tile).
+8. You have three steps/turns before OMI make a step.
+9. Shuffling, playing, merging, depositing, and withdrawing cards will take a step.
+
+## Special
 <details>
-  <summary>**Special for Terra reviewers**, please click me.</summary>
+  <summary>For Terra reviewers, please click me.</summary>
   
   ### Week 1-3
   [Working on other project(s)]
@@ -47,7 +62,7 @@ You could just install the release [here](https://github.com/nastar-forever/over
   https://github.com/nastar-forever/over-the-ai/releases/tag/uhh_yeah_another_publish
 </details>
 
-## Controls:
+### Controls:
 ```
 Drag and drop  : Merging or deposit a card into bank
 Click on a card: Play that card or withdraw that card from bank
@@ -56,8 +71,8 @@ R              : Rotate a placement
 F              : Flip placement
 ```
 
-## Mechanics
-### AI
+### Mechanics
+#### AI
 The AI would pathfind into these tiles (in order, from lowest priority to highest priority)
 ```
 [1] Vulnerability (yellow tiles)
@@ -68,16 +83,16 @@ The AI would pathfind into these tiles (in order, from lowest priority to highes
 When the AI step on an exit tile, it's a game over
 But the AI wouldn't be able to exit right away. There are several levels of SMWalls the AI must breach first. The AI could collapse an SMWall by stepping on (exploiting) enough Vulnerabilities (displayed on the top right).
 
-### Cards
+#### Cards
 > Note:
 > Shuffling your card discard every fetched card (except bank) and draws you 4 new cards.
-#### Placement
+##### Placement
 Perhaps most crucial card. You could place an obstacle to isolate the AI.
 
-#### Manipulations
+##### Manipulations
 Well... Manipulate the AI. So far only Lure card were added into this category.
 
-### Bank
+#### Bank
 The bank is the place where you can safely store your important cards (cards inside bank aren't affected by shuffling). The bank has a maximum capacity of four.
 
 Cards inside bank cannot be played nor merged until they're fetched.
