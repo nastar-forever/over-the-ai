@@ -35,7 +35,7 @@ This project written in Python, using PyGame (CE) and convert it to .exe by usin
 You could just install the release [here](https://github.com/nastar-forever/over-the-ai/releases/latest). Download the zip file, extract it, and run over-the-ai.exe.
 
 <details>
-  <summary>Special for Terra reviewers, please click me.</summary>
+  <summary>**Special for Terra reviewers**, please click me.</summary>
   
   ### Week 1-3
   [Working on other project(s)]
