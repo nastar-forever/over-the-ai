@@ -43,10 +43,10 @@ You could just install the release [here](https://github.com/nastar-forever/over
 3. Play a card by clicking on them. `deposit` a card by dragging it into bank, and `withdraw` a card by clicking a card from `bank`.
 4. You can `shuffle` your `fetched` card and hope for better cards (`bank` are unaffected by this `shuffle`)
 5. Your objective is to prevent OMI from escaping to the `exit` (reaching the edge/red map border).
-6. At first, OMI would have a limited mobility, but their mobility would expands as they unlock new `level`s, progressively towards the `exit`
-7. OMI can unlock `level` by `exploiting` (in-game mechanic term. `exploit` count when OMI stepped on a tile) enough `vulnerability`(s) (a yellow '!!!' tile).
+6. At first, OMI would have a limited mobility, but their mobility would expand as they unlock new `level`s, progressively towards the `exit`
+7. OMI can unlock new `level`s by `exploiting` (in-game mechanic term. `exploit` counts when OMI stepped on a tile) enough `vulnerability`(s) (yellow '!!!' tiles).
 8. You have three steps/turns before OMI make a step.
-9. Shuffling, playing, merging, depositing, and withdrawing cards will take a step.
+9. Shuffling, playing, merging, depositing, and withdrawing a card will take a step.
 
 ### Controls:
 ```
